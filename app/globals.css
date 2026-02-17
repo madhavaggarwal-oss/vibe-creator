@@ -1,0 +1,213 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #111827;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Progress animation for generating overlay */
+@keyframes progress {
+  0% {
+    width: 0%;
+  }
+  50% {
+    width: 70%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+.animate-progress {
+  animation: progress 8s ease-in-out infinite;
+}
+
+/* Vibe Site animated background */
+.vibe-animated-bg {
+  background: linear-gradient(
+    135deg,
+    rgba(254, 196, 3, 0.06) 0%,
+    rgba(40, 150, 251, 0.08) 40%,
+    rgba(75, 207, 41, 0.05) 70%,
+    rgba(254, 196, 3, 0.03) 100%
+  );
+}
+
+/* Moving gradient sweep across the background */
+@keyframes gradientSweep {
+  0% {
+    background-position: 0% 50%;
+  }
+  25% {
+    background-position: 100% 25%;
+  }
+  50% {
+    background-position: 50% 100%;
+  }
+  75% {
+    background-position: 0% 75%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.vibe-gradient-sweep {
+  background: linear-gradient(
+    -45deg,
+    rgba(254, 196, 3, 0.12),
+    rgba(40, 150, 251, 0.12),
+    rgba(75, 207, 41, 0.10),
+    rgba(254, 196, 3, 0.08),
+    rgba(40, 150, 251, 0.10),
+    rgba(75, 207, 41, 0.12)
+  );
+  background-size: 400% 400%;
+  animation: gradientSweep 8s ease-in-out infinite;
+}
+
+@keyframes blob1 {
+  0%,
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  20% {
+    transform: translate(120px, -80px) scale(1.15);
+  }
+  40% {
+    transform: translate(60px, 60px) scale(0.9);
+  }
+  60% {
+    transform: translate(-80px, 30px) scale(1.1);
+  }
+  80% {
+    transform: translate(-40px, -60px) scale(0.95);
+  }
+}
+
+@keyframes blob2 {
+  0%,
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  20% {
+    transform: translate(-100px, 70px) scale(1.12);
+  }
+  40% {
+    transform: translate(-40px, -90px) scale(0.88);
+  }
+  60% {
+    transform: translate(80px, -30px) scale(1.05);
+  }
+  80% {
+    transform: translate(50px, 50px) scale(0.92);
+  }
+}
+
+@keyframes blob3 {
+  0%,
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  20% {
+    transform: translate(70px, 90px) scale(0.9);
+  }
+  40% {
+    transform: translate(-80px, 50px) scale(1.15);
+  }
+  60% {
+    transform: translate(40px, -70px) scale(1.05);
+  }
+  80% {
+    transform: translate(-50px, -40px) scale(0.95);
+  }
+}
+
+.vibe-blob-1 {
+  background: radial-gradient(
+    circle,
+    rgba(254, 196, 3, 0.5) 0%,
+    rgba(254, 196, 3, 0) 70%
+  );
+  top: -10%;
+  left: 10%;
+  animation: blob1 10s ease-in-out infinite;
+}
+
+.vibe-blob-2 {
+  background: radial-gradient(
+    circle,
+    rgba(40, 150, 251, 0.45) 0%,
+    rgba(40, 150, 251, 0) 70%
+  );
+  top: 10%;
+  right: 5%;
+  animation: blob2 12s ease-in-out infinite;
+}
+
+.vibe-blob-3 {
+  background: radial-gradient(
+    circle,
+    rgba(75, 207, 41, 0.4) 0%,
+    rgba(75, 207, 41, 0) 70%
+  );
+  bottom: -5%;
+  left: 30%;
+  animation: blob3 14s ease-in-out infinite;
+}
+
+/* Canvas skeleton fade-in */
+@keyframes skeletonFade {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.canvas-skeleton-fade {
+  animation: skeletonFade 0.8s ease-out forwards;
+}
+
+/* Scrollbar styling */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Code editor: ensure textarea tab behavior */
+.code-editor-textarea {
+  tab-size: 2;
+  -moz-tab-size: 2;
+  white-space: pre;
+  word-wrap: normal;
+}
