@@ -209,7 +209,7 @@ export default function GenerateResultPage() {
   const [currentPage, setCurrentPage] = useState("/");
 
   const startGeneration = useCallback(
-    async (prompt: string, model: string, images?: string[]) => {
+    async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>) => {
       setGeneratingState("generating");
       setGenerationStep(0);
       setGenerationProgress(0);
@@ -236,7 +236,7 @@ export default function GenerateResultPage() {
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, model, images }),
+          body: JSON.stringify({ prompt, model, images, scrapeData }),
           signal: controller.signal,
         });
 
@@ -289,14 +289,14 @@ export default function GenerateResultPage() {
       const stored = sessionStorage.getItem("vibe-pending-generation");
       if (stored) {
         sessionStorage.removeItem("vibe-pending-generation");
-        const { prompt, model, images } = JSON.parse(stored);
+        const { prompt, model, images, scrapeData } = JSON.parse(stored);
         setPendingPrompt(prompt);
         setPendingModel(model);
         if (Array.isArray(images) && images.length > 0) {
           setPendingPromptImages(images);
         }
         setLoading(false);
-        startGeneration(prompt, model, images);
+        startGeneration(prompt, model, images, scrapeData || undefined);
       } else {
         // No pending data, go back
         router.replace("/");

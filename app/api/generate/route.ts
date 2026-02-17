@@ -6,7 +6,7 @@ import { saveFunnel, extractProjectName } from "@/lib/storage";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, model, images } = body;
+    const { prompt, model, images, scrapeData } = body;
 
     if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
       return NextResponse.json(
@@ -19,7 +19,12 @@ export async function POST(request: NextRequest) {
     const id = uuidv4();
 
     const imageList = Array.isArray(images) ? images.filter((i: unknown) => typeof i === "string") : [];
-    const files = await generateFunnel(prompt.trim(), modelId, imageList.length > 0 ? imageList : undefined);
+    const files = await generateFunnel(
+      prompt.trim(),
+      modelId,
+      imageList.length > 0 ? imageList : undefined,
+      scrapeData || undefined
+    );
 
     const name = extractProjectName(files) || prompt.trim().slice(0, 60);
 
@@ -28,6 +33,7 @@ export async function POST(request: NextRequest) {
       name,
       prompt: prompt.trim(),
       ...(imageList.length > 0 ? { promptImages: imageList } : {}),
+      ...(scrapeData?.metadata?.title ? { scrapeUrl: scrapeData.metadata.title } : {}),
       model: modelId,
       pages: [] as { title: string; slug: string; html: string }[],
       files,

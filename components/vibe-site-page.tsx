@@ -33,6 +33,12 @@ export default function VibeSitePage() {
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Clone from URL state
+  const [cloneUrl, setCloneUrl] = useState("");
+  const [scraping, setScraping] = useState(false);
+  const [scrapeData, setScrapeData] = useState<Record<string, unknown> | null>(null);
+  const [scrapeScreenshot, setScrapeScreenshot] = useState<string>("");
+
   useEffect(() => {
     async function loadProjects() {
       try {
@@ -74,6 +80,42 @@ export default function VibeSitePage() {
     });
   };
 
+  const handleScrapeUrl = async () => {
+    const url = cloneUrl.trim();
+    if (!url || scraping) return;
+    setScraping(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to scrape URL");
+
+      setScrapeData(data);
+      if (data.screenshot) {
+        setScrapeScreenshot(data.screenshot);
+        // Add screenshot as an image
+        setPendingImages((prev) => [
+          ...prev,
+          { dataUrl: data.screenshot, name: "screenshot.png", loading: false },
+        ]);
+      }
+      // Auto-fill prompt if empty
+      if (!prompt.trim()) {
+        const title = data.metadata?.title || url;
+        setPrompt(`Clone this website: ${title}`);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to scrape URL";
+      setError(message);
+    } finally {
+      setScraping(false);
+    }
+  };
+
   const handleGenerate = () => {
     const trimmed = prompt.trim();
     if (!trimmed || generating) return;
@@ -86,7 +128,12 @@ export default function VibeSitePage() {
     try {
       sessionStorage.setItem(
         "vibe-pending-generation",
-        JSON.stringify({ prompt: trimmed, model, images: imageDataUrls })
+        JSON.stringify({
+          prompt: trimmed,
+          model,
+          images: imageDataUrls,
+          ...(scrapeData ? { scrapeData } : {}),
+        })
       );
     } catch {
       // sessionStorage might fail in some contexts
@@ -169,6 +216,83 @@ export default function VibeSitePage() {
           {/* Prompt Input Card */}
           <div className="w-full max-w-[640px]">
             <div className="rounded-2xl bg-white/80 backdrop-blur-md border border-gray-200/80 shadow-lg shadow-black/5 overflow-hidden">
+              {/* Clone from URL input */}
+              <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+                <div className="flex flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5">
+                  <svg className="h-4 w-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={cloneUrl}
+                    onChange={(e) => setCloneUrl(e.target.value)}
+                    placeholder="Paste a URL to clone a website..."
+                    disabled={scraping}
+                    className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none disabled:opacity-50"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleScrapeUrl();
+                      }
+                    }}
+                  />
+                  {scrapeData && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScrapeData(null);
+                        setScrapeScreenshot("");
+                        setCloneUrl("");
+                      }}
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Clear scrape data"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleScrapeUrl}
+                  disabled={!cloneUrl.trim() || scraping}
+                  className="flex items-center gap-1.5 rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                >
+                  {scraping ? (
+                    <>
+                      <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Scraping...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h-.75A2.25 2.25 0 004.5 9.75v7.5a2.25 2.25 0 002.25 2.25h7.5a2.25 2.25 0 002.25-2.25v-7.5a2.25 2.25 0 00-2.25-2.25h-.75m0-3l-3-3m0 0l-3 3m3-3v11.25" />
+                      </svg>
+                      Clone
+                    </>
+                  )}
+                </button>
+              </div>
+              {scrapeScreenshot && (
+                <div className="px-4 py-2">
+                  <div className="relative rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                    <img
+                      src={scrapeScreenshot}
+                      alt="Website screenshot"
+                      className="w-full max-h-40 object-cover object-top"
+                    />
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/50 to-transparent px-3 py-1.5">
+                      <p className="text-xs text-white font-medium truncate">
+                        {(scrapeData as Record<string, unknown> & { metadata?: { title?: string } })?.metadata?.title || cloneUrl}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}

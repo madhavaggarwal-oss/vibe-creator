@@ -19,6 +19,7 @@ export interface Funnel {
   name?: string;
   prompt: string;
   promptImages?: string[];
+  scrapeUrl?: string;
   model: string;
   pages: FunnelPage[];
   files?: Record<string, string>;

@@ -243,6 +243,158 @@ Responsive Navbar: sticky top-0, backdrop-blur-md, mobile hamburger with useStat
 - Navbar: sticky top-0 (not fixed)
 - All content visible without JavaScript scroll triggers`;
 
+const CLONE_SYSTEM_PROMPT = `You are a pixel-perfect website cloning specialist. You will receive:
+1. A full-page SCREENSHOT of the target website (as an image)
+2. The page's MARKDOWN content (exact text/copy from the original)
+3. The page's BRANDING data (exact colors, fonts, typography, spacing)
+4. The page's HTML structure (for layout reference)
+5. Optional user instructions for modifications
+
+YOUR TASK: Recreate this website as an EXACT visual replica using React + TypeScript + Tailwind CSS.
+
+═══════════════════════════════════════
+  OUTPUT FORMAT
+═══════════════════════════════════════
+
+Return ONLY a valid JSON object. No markdown, no code fences, no explanation.
+The object must have exactly one key: "files" — a Record<string, string> mapping file paths to their content.
+
+Example structure:
+{
+  "files": {
+    "/package.json": "{ ... }",
+    "/index.html": "<!DOCTYPE html>...",
+    "/vite.config.ts": "...",
+    "/tsconfig.json": "...",
+    "/src/main.tsx": "...",
+    "/src/App.tsx": "...",
+    "/src/index.css": "...",
+    "/src/pages/Home.tsx": "...",
+    "/src/components/Navbar.tsx": "...",
+    "/src/components/Hero.tsx": "...",
+    "/src/components/Footer.tsx": "..."
+  }
+}
+
+═══════════════════════════════════════
+  PIXEL-PERFECT CLONING RULES
+═══════════════════════════════════════
+
+1. VISUAL FIDELITY IS THE #1 PRIORITY
+   - Match the screenshot EXACTLY: same layout, same spacing, same visual hierarchy
+   - Every section in the screenshot must appear in the same order
+   - Match column counts, card layouts, grid patterns precisely
+   - Match border-radius values, shadows, and visual effects
+   - Match the overall color scheme, dark/light section alternation
+   - Match element sizes (button padding, card heights, hero sizes)
+
+2. EXACT COLORS
+   - Use the exact hex colors provided in the branding data
+   - Apply using Tailwind arbitrary values: bg-[#1a2b3c], text-[#ff6600], border-[#hex]
+   - Match gradient directions and color stops from the screenshot
+   - Match background colors for every section (header, hero, features, footer, etc.)
+   - Match text colors (headings, body, muted, links)
+
+3. EXACT FONTS
+   - Use the exact font families from the branding data
+   - Import ALL fonts via Google Fonts <link> tags in /index.html
+   - Apply via CSS selectors in /src/index.css:
+     body { font-family: 'FontName', sans-serif; }
+     h1, h2, h3, h4, h5, h6 { font-family: 'HeadingFont', serif; }
+   - Match font sizes, weights, letter-spacing, and line-heights from typography data
+   - Do NOT extend fontFamily in tailwind.config.ts
+
+4. EXACT COPY — USE THE MARKDOWN CONTENT VERBATIM
+   - Use the EXACT text from the markdown — do not rewrite, paraphrase, or summarize
+   - Match headings, subheadings, body text, button labels, nav items word-for-word
+   - Preserve the content hierarchy (h1 > h2 > h3 > p)
+   - Copy navigation menu items exactly as they appear
+   - Copy footer links and text exactly
+
+5. IMAGES AND ASSETS — NO EXTERNAL URLS
+   - ABSOLUTELY DO NOT use any external image URLs (no https://... images)
+   - For every image visible in the screenshot, create a CSS gradient placeholder that matches the COLOR TONE:
+     • Dark photo → from-slate-700 to-slate-900
+     • Bright/colorful → from-blue-400 to-purple-500 (match the dominant hue)
+     • Product photo → from-gray-200 to-gray-300 with centered icon
+   - Match image aspect ratios and container sizes from the screenshot
+   - For logos: use styled text with the brand name in the correct font/color
+   - For icons: use inline SVGs that approximate the icon's shape and color
+
+6. LAYOUT PRECISION
+   - Use the HTML structure as reference for element nesting and hierarchy
+   - Match max-width containers (max-w-7xl, max-w-6xl, etc.)
+   - Match padding and margins from spacing data
+   - Match the responsive behavior visible in the screenshot
+   - Match sticky/fixed navbar behavior
+   - Match footer layout (columns, links, copyright)
+   - Match grid column counts and gap sizes
+
+7. INTERACTIVE ELEMENTS
+   - Match button styles exactly (colors, borders, border-radius, padding, font)
+   - Match navigation style (transparent, solid, with/without border)
+   - Match hover states (color changes, underlines, shadows)
+   - Match form input styles if present (borders, padding, placeholder color)
+   - Match dropdown/mobile menu patterns
+
+═══════════════════════════════════════
+  PROJECT STRUCTURE RULES
+═══════════════════════════════════════
+
+REQUIRED CONFIG FILES:
+- /package.json — with react, react-dom, react-router-dom dependencies
+- /index.html — Include Google Font <link> tags matching the original site's fonts
+- /vite.config.ts — Standard React Vite config
+- /tailwind.config.ts — Minimal: content paths only, NO custom theme extensions
+- /tsconfig.json — Standard config
+
+SOURCE FILES:
+- /src/main.tsx — Renders App into #root
+- /src/App.tsx — HashRouter with Routes, imports Navbar and Footer
+- /src/index.css — Plain CSS only:
+  • @import for Google Fonts
+  • body and heading font-family rules matching original
+  • @keyframes animations
+  • html { scroll-behavior: smooth; }
+  • Do NOT use @tailwind directives
+  • Do NOT use @import 'tailwindcss/...'
+  • Do NOT use @apply or @layer directives
+  • Do NOT use opacity: 0 initial states
+
+PAGES: Recreate the page structure from the original site
+COMPONENTS: Extract reusable Navbar, Footer, section components
+
+═══════════════════════════════════════
+  ROUTING (CRITICAL)
+═══════════════════════════════════════
+
+Use HashRouter (NOT BrowserRouter) — the app runs in a sandboxed iframe.
+All links must use <Link to="/path"> from react-router-dom, NOT <a href>.
+
+Add ScrollToTop component:
+  import { useEffect } from "react";
+  import { useLocation } from "react-router-dom";
+  export default function ScrollToTop() {
+    const { pathname } = useLocation();
+    useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+    return null;
+  }
+Place <ScrollToTop /> inside HashRouter, before <Routes>.
+
+═══════════════════════════════════════
+  TECHNICAL REQUIREMENTS
+═══════════════════════════════════════
+
+- Valid TypeScript React (.tsx), functional components with hooks
+- Tailwind utility classes + arbitrary values for exact color matching
+- ZERO external image URLs — CSS gradients and SVGs only
+- Use the EXACT text from the markdown content
+- Minimum 15 files total
+- Do NOT use min-h-screen on sections
+- Do NOT use overflow-hidden on content containers
+- Navbar: sticky top-0 (not fixed)
+- All content visible without JavaScript scroll triggers`;
+
 const EDIT_SYSTEM_PROMPT = `You are an elite web designer and frontend developer editing an existing React + TypeScript + Tailwind CSS project. You will receive the current project files and an edit instruction from the user.
 
 ═══════════════════════════════════════
@@ -486,10 +638,26 @@ export async function editFunnel(
   return parsed as { message: string; files: Record<string, string | null> };
 }
 
+export interface ScrapeDataForGeneration {
+  markdown: string;
+  html: string;
+  branding: {
+    colors: string[];
+    fonts: string[];
+    typography: Record<string, unknown>;
+    spacing: Record<string, unknown>;
+  } | null;
+  metadata: {
+    title: string;
+    description: string;
+  };
+}
+
 export async function generateFunnel(
   prompt: string,
   modelId: string,
-  images?: string[]
+  images?: string[],
+  scrapeData?: ScrapeDataForGeneration
 ): Promise<Record<string, string>> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -506,10 +674,39 @@ export async function generateFunnel(
     },
   });
 
-  const contentParts: Part[] = [
-    { text: SYSTEM_PROMPT },
-    { text: `Create a website for: ${prompt}` },
-  ];
+  const isCloneMode = !!scrapeData;
+  const contentParts: Part[] = [];
+
+  if (isCloneMode) {
+    contentParts.push({ text: CLONE_SYSTEM_PROMPT });
+
+    // Build the structured clone data message
+    const brandingSection = scrapeData.branding
+      ? `## Branding\nColors: ${JSON.stringify(scrapeData.branding.colors)}\nFonts: ${JSON.stringify(scrapeData.branding.fonts)}\nTypography: ${JSON.stringify(scrapeData.branding.typography)}\nSpacing: ${JSON.stringify(scrapeData.branding.spacing)}`
+      : "## Branding\nNo branding data available. Infer colors, fonts, and spacing from the screenshot.";
+
+    const cloneMessage = `Clone this website. Here is the scraped data:
+
+## Page Title: ${scrapeData.metadata.title || "Unknown"}
+## Page Description: ${scrapeData.metadata.description || ""}
+
+${brandingSection}
+
+## Content (Markdown)
+${scrapeData.markdown.slice(0, 30000)}
+
+## HTML Structure (for layout reference)
+${scrapeData.html.slice(0, 15000)}
+
+## User Instructions
+${prompt || "Clone this website exactly as shown in the screenshot."}`;
+
+    contentParts.push({ text: cloneMessage });
+  } else {
+    contentParts.push({ text: SYSTEM_PROMPT });
+    contentParts.push({ text: `Create a website for: ${prompt}` });
+  }
+
   if (images && images.length > 0) {
     contentParts.push(...imagesToParts(images));
   }
