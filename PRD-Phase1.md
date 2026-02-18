@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 41 user stories | 20 Built | 5 Partial | 16 Pending**
+**Total: 41 user stories | 21 Built | 5 Partial | 15 Pending**
 
 ---
 
@@ -528,22 +528,22 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 ---
 
-### US-5.6: Resizable Chat Panel `PENDING`
+### US-5.6: Resizable Chat Panel `BUILT`
 **As a** user, **I want** to drag the divider between chat and canvas to resize the chat panel **so that** I can allocate more or less space to the chat.
 
 **Acceptance Criteria:**
-- [ ] A 4px-wide draggable divider between the chat panel and the canvas
-- [ ] Cursor changes to `col-resize` on hover over the divider
-- [ ] Divider has a subtle visual handle (thin line or dots) on hover
-- [ ] Dragging resizes the chat panel width in real-time
-- [ ] Minimum width: 20% of total viewport width
-- [ ] Maximum width: 40% of total viewport width
-- [ ] Default width: 30% of total viewport width (~384px at 1280px viewport)
-- [ ] Chat content reflows smoothly during resize (no overflow clipping)
-- [ ] Canvas/preview adjusts its width to fill remaining space
-- [ ] Resize preference persisted in localStorage for session continuity
-- [ ] Double-clicking the divider resets to default width
-- [ ] Collapse button still available to fully hide the panel
+- [x] A draggable divider at the canvas border edge
+- [x] Cursor changes to `col-resize` on hover over the divider
+- [x] Invisible handle — no visible UI, just cursor change at canvas edge
+- [x] Dragging resizes the chat panel width in real-time
+- [x] Minimum width: 280px
+- [x] Maximum width: 500px
+- [x] Default width: 320px
+- [x] Chat content reflows smoothly during resize (no overflow clipping)
+- [x] Canvas/preview adjusts its width to fill remaining space
+- [x] Resize preference persisted in localStorage for session continuity
+- [x] Double-clicking the divider resets to default width
+- [x] Collapse button still available to fully hide the panel
 
 **Implementation Notes:** Replace fixed `w-80` class with dynamic width state. Implement mouse event handlers (mousedown on divider, mousemove to track, mouseup to finish).
 
@@ -882,14 +882,14 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 2. Project Management | 9 | 6 | 0 | 3 |
 | 3. Prompt Box (Main) | 4 | 2 | 1 | 1 |
 | 4. Prompt Box (Canvas) | 5 | 2 | 1 | 2 |
-| 5. Chat Features | 6 | 0 | 1 | 5 |
+| 5. Chat Features | 6 | 1 | 1 | 4 |
 | 6. Context Management | 1 | 0 | 0 | 1 |
 | 7. Canvas Top Bar | 6 | 3 | 1 | 2 |
 | 8. Code View & Export | 2 | 2 | 0 | 0 |
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
 | 10. Error Handling & Resilience | 1 | 1 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **41** | **20** | **5** | **16** |
+| **TOTAL** | **41** | **21** | **5** | **15** |
 
 ---
 
