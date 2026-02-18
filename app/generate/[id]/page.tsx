@@ -869,9 +869,9 @@ export default function GenerateResultPage() {
   return (
     <div className="flex h-screen flex-col bg-white overflow-hidden">
       {/* Top bar */}
-      <header className="flex items-center border-b border-gray-200 bg-white shrink-0 h-11">
+      <header className="flex items-center bg-[#F9FAFB] shrink-0 h-14">
         {/* Left zone - Project name (above chat panel) */}
-        <div className={`flex items-center justify-between shrink-0 px-3 h-full border-r border-gray-200 transition-all ${chatCollapsed ? "w-12" : "w-80"}`}>
+        <div className={`flex items-center justify-between shrink-0 px-3 h-full transition-all ${chatCollapsed ? "w-12" : "w-80"}`}>
           {!chatCollapsed && (
             <>
               <div className="flex items-center gap-1.5 min-w-0">
@@ -880,27 +880,27 @@ export default function GenerateResultPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12" />
                   </svg>
                 </Link>
-                <span className="text-[13px] font-semibold text-gray-800 truncate">{projectName}</span>
-                <button className="shrink-0 text-gray-400 hover:text-gray-600 transition-colors">
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <span className="text-sm font-semibold text-gray-800 truncate">{projectName}</span>
+                <button className="shrink-0 text-gray-500 hover:text-gray-700 transition-colors">
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                   </svg>
                 </button>
               </div>
               <div className="flex items-center gap-0.5">
                 {/* Version history */}
-                <button className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" title="Version history">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <button className="rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors" title="Version history">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </button>
                 {/* Collapse chat */}
                 <button
                   onClick={() => setChatCollapsed(true)}
-                  className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                  className="rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
                   title="Collapse chat"
                 >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
                   </svg>
                 </button>
@@ -910,10 +910,10 @@ export default function GenerateResultPage() {
           {chatCollapsed && (
             <button
               onClick={() => setChatCollapsed(false)}
-              className="mx-auto rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              className="mx-auto rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
               title="Expand chat"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
               </svg>
             </button>
@@ -923,38 +923,38 @@ export default function GenerateResultPage() {
         {/* Right zone - Preview controls & actions */}
         <div className="flex flex-1 items-center justify-between px-3 h-full">
           {/* Preview / Code toggle */}
-          <div className="flex items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => setViewMode("preview")}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border h-8 text-sm font-medium transition-all ${
                 viewMode === "preview"
-                  ? "bg-blue-50 text-blue-700 border border-blue-200"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-blue-50 text-blue-700 border-blue-200 px-4"
+                  : "border-gray-200 bg-white text-gray-500 hover:text-gray-700 hover:border-gray-300 px-2.5"
               }`}
             >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              Preview
+              {viewMode === "preview" && "Preview"}
             </button>
             <button
               onClick={() => setViewMode("code")}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border h-8 text-sm font-medium transition-all ${
                 viewMode === "code"
-                  ? "bg-blue-50 text-blue-700 border border-blue-200"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-blue-50 text-blue-700 border-blue-200 px-4"
+                  : "border-gray-200 bg-white text-gray-500 hover:text-gray-700 hover:border-gray-300 px-2.5"
               }`}
             >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
               </svg>
-              Code
+              {viewMode === "code" && "Code"}
             </button>
           </div>
 
-          {/* Center controls */}
-          <div className="flex items-center gap-1.5">
+          {/* Center controls — pill bar */}
+          <div className="flex items-center">
             {isReady && funnel && viewMode === "code" ? (
               <div className="flex items-center gap-1.5 text-xs text-gray-500">
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
@@ -963,64 +963,50 @@ export default function GenerateResultPage() {
                 <span className="font-medium text-gray-700">{fileCount} files</span>
               </div>
             ) : isReady && funnel && viewMode === "preview" ? (
-              <>
-                {/* Device selector */}
-                <div className="flex items-center gap-0.5 rounded-md border border-gray-200 bg-gray-50 p-0.5">
-                  <button
-                    onClick={() => setDevice("desktop")}
-                    className={`rounded p-1 transition-colors ${device === "desktop" ? "bg-white text-gray-800 shadow-sm" : "text-gray-400 hover:text-gray-600"}`}
-                    title="Desktop"
+              <div className="flex items-center rounded-full border border-gray-200 bg-white px-1.5 py-1 gap-1 min-w-[280px]">
+                {/* Device toggle — click to cycle */}
+                <button
+                  onClick={() => {
+                    const order = ["desktop", "tablet", "mobile"] as const;
+                    const idx = order.indexOf(device as typeof order[number]);
+                    setDevice(order[(idx + 1) % order.length]);
+                  }}
+                  className="rounded-full p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                  title={`Switch device (${device})`}
+                >
+                  {device === "desktop" ? (
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
+                  ) : device === "tablet" ? (
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5h3m-6.75 2.25h10.5a2.25 2.25 0 002.25-2.25V4.5a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 4.5v15a2.25 2.25 0 002.25 2.25z" /></svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" /></svg>
+                  )}
+                </button>
+
+                {/* Page selector */}
+                <div className="relative">
+                  <select
+                    value={currentPage}
+                    onChange={(e) => { setCurrentPage(e.target.value); setRefreshKey((k) => k + 1); }}
+                    className="appearance-none bg-transparent text-sm text-gray-600 font-medium cursor-pointer outline-none pl-2 pr-5 py-0.5 hover:text-gray-900 transition-colors"
+                    style={{
+                      backgroundImage: pageRoutes.length > 1 ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' fill='%239CA3AF' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E")` : "none",
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 2px center",
+                    }}
                   >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>
-                  </button>
-                  <div className="relative">
-                    <select
-                      value={device}
-                      onChange={(e) => setDevice(e.target.value)}
-                      className={`appearance-none rounded p-1 pr-5 text-xs cursor-pointer bg-transparent outline-none transition-colors ${device !== "desktop" ? "text-gray-800" : "text-gray-400"}`}
-                      style={{
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' fill='%239CA3AF' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E")`,
-                        backgroundRepeat: "no-repeat",
-                        backgroundPosition: "right 4px center",
-                      }}
-                    >
-                      {DEVICES.map((d) => (
-                        <option key={d.id} value={d.id}>{d.label}</option>
-                      ))}
-                    </select>
-                  </div>
+                    {pageRoutes.length > 0 ? (
+                      pageRoutes.map((route) => (
+                        <option key={route.path} value={route.path}>{route.path || "/"}</option>
+                      ))
+                    ) : (
+                      <option value="/">/</option>
+                    )}
+                  </select>
                 </div>
 
-                {/* Page selector dropdown */}
-                {pageRoutes.length > 1 && (
-                  <div className="relative">
-                    <select
-                      value={currentPage}
-                      onChange={(e) => { setCurrentPage(e.target.value); setRefreshKey((k) => k + 1); }}
-                      className="appearance-none rounded-md border border-gray-200 bg-gray-50 px-3 pr-7 py-1 text-xs font-medium text-gray-700 cursor-pointer outline-none hover:bg-gray-100 focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30 transition-colors"
-                      style={{
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' fill='%236B7280' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E")`,
-                        backgroundRepeat: "no-repeat",
-                        backgroundPosition: "right 8px center",
-                      }}
-                    >
-                      {pageRoutes.map((route) => (
-                        <option key={route.path} value={route.path}>{route.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Refresh */}
-                <button
-                  onClick={() => setRefreshKey((k) => k + 1)}
-                  className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                  title="Refresh preview"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
-                  </svg>
-                </button>
+                {/* Spacer */}
+                <div className="flex-1" />
 
                 {/* Open in new tab */}
                 <button
@@ -1029,14 +1015,25 @@ export default function GenerateResultPage() {
                       window.open(`/preview-react/${funnel.id}`, "_blank");
                     }
                   }}
-                  className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                  className="rounded-full p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
                   title="Open in new tab"
                 >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                   </svg>
                 </button>
-              </>
+
+                {/* Refresh */}
+                <button
+                  onClick={() => setRefreshKey((k) => k + 1)}
+                  className="rounded-full p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                  title="Refresh preview"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+                  </svg>
+                </button>
+              </div>
             ) : isGenerating ? (
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -1061,22 +1058,22 @@ export default function GenerateResultPage() {
             {viewMode === "code" ? (
               <button
                 onClick={() => setViewMode("preview")}
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
                 Close
               </button>
             ) : (
               <>
-                <button className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <button className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 h-8 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
                   </svg>
                   Share
                 </button>
-                <button className="inline-flex items-center rounded-md bg-blue-600 px-4 py-1 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition-all">
+                <button className="inline-flex items-center rounded-lg bg-blue-600 px-5 h-8 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all">
                   Publish
                 </button>
               </>
@@ -1088,7 +1085,7 @@ export default function GenerateResultPage() {
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Chat panel (left) */}
-        <div className={`flex shrink-0 flex-col border-r border-gray-200 bg-gray-50 transition-all duration-200 ${chatCollapsed ? "w-0 overflow-hidden border-r-0" : "w-80"}`}>
+        <div className={`flex shrink-0 flex-col bg-[#F9FAFB] transition-all duration-200 ${chatCollapsed ? "w-0 overflow-hidden" : "w-80"}`}>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {/* Show prompt for generating/aborted state */}
@@ -1191,7 +1188,7 @@ export default function GenerateResultPage() {
           </div>
 
           {/* Chat input */}
-          <div className="border-t border-gray-200 bg-white p-3">
+          <div className="bg-[#F9FAFB] p-3">
             {isGenerating ? (
               <button
                 type="button"
@@ -1244,7 +1241,7 @@ export default function GenerateResultPage() {
                 )}
                 <form
                   onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
-                  className="flex items-center gap-2 rounded-xl bg-gray-50 border border-gray-200 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400/30 transition-all"
+                  className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400/30 transition-all"
                 >
                   <input
                     ref={chatFileInputRef}
@@ -1289,10 +1286,10 @@ export default function GenerateResultPage() {
         </div>
 
         {/* Canvas (right) */}
-        <div className="flex flex-1 flex-col items-center justify-center bg-gray-100 overflow-hidden" style={{ padding: viewMode === "code" ? 0 : "1rem" }}>
+        <div className="flex flex-1 flex-col items-center justify-center bg-[#F9FAFB] overflow-hidden pt-1 px-3 pb-3">
           {/* ── Generating animation in canvas ── */}
           {isGenerating && (
-            <div className="relative w-full h-full rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
+            <div className="relative w-full h-full rounded-2xl border border-gray-200 bg-white shadow-lg overflow-hidden">
               {/* Animated gradient background */}
               <div className="absolute inset-0 vibe-animated-bg">
                 <div className="absolute inset-0 vibe-gradient-sweep" />
@@ -1362,7 +1359,7 @@ export default function GenerateResultPage() {
 
           {/* ── Aborted state in canvas ── */}
           {isAborted && (
-            <div className="relative w-full h-full rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden flex items-center justify-center">
+            <div className="relative w-full h-full rounded-2xl border border-gray-200 bg-white shadow-lg overflow-hidden flex items-center justify-center">
               <div className="flex flex-col items-center gap-5 text-center px-6">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50">
                   <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="#F59E0B" strokeWidth={1.5}>
@@ -1400,7 +1397,7 @@ export default function GenerateResultPage() {
           {isReady && projectFiles && viewMode === "preview" && (
             <>
               <div
-                className="relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg transition-all duration-300"
+                className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-lg transition-all duration-300"
                 style={{
                   width: selectedDevice.width,
                   height: selectedDevice.height,
