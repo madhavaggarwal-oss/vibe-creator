@@ -116,6 +116,12 @@ export default function ReactProjectPreview({
     if (startRoute && startRoute !== "/") {
       bridgeLines.push(`if (window.location.hash !== "#${startRoute}") { window.location.hash = "#${startRoute}"; }`);
     }
+    // Snapshot capture listener: responds to postMessage with rendered HTML
+    bridgeLines.push(`window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "capture-html") {
+    window.parent.postMessage({ type: "html-snapshot", html: document.documentElement.outerHTML }, "*");
+  }
+});`);
     bridgeLines.push('export { default } from "./src/App";');
 
     sfFiles["/App.tsx"] = {

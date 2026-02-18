@@ -26,18 +26,13 @@ export default function VibeSitePage() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<FunnelProject[]>([]);
-  const [projectsTab, setProjectsTab] = useState<
-    "recently-viewed" | "my-projects" | "templates"
-  >("my-projects");
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Clone from URL state
   const [cloneUrl, setCloneUrl] = useState("");
-  const [scraping, setScraping] = useState(false);
-  const [scrapeData, setScrapeData] = useState<Record<string, unknown> | null>(null);
-  const [scrapeScreenshot, setScrapeScreenshot] = useState<string>("");
+  const [scraping] = useState(false);
 
   useEffect(() => {
     async function loadProjects() {
@@ -80,40 +75,28 @@ export default function VibeSitePage() {
     });
   };
 
-  const handleScrapeUrl = async () => {
+  const handleCloneUrl = () => {
     const url = cloneUrl.trim();
     if (!url || scraping) return;
-    setScraping(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/scrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to scrape URL");
 
-      setScrapeData(data);
-      if (data.screenshot) {
-        setScrapeScreenshot(data.screenshot);
-        // Add screenshot as an image
-        setPendingImages((prev) => [
-          ...prev,
-          { dataUrl: data.screenshot, name: "screenshot.png", loading: false },
-        ]);
-      }
-      // Auto-fill prompt if empty
-      if (!prompt.trim()) {
-        const title = data.metadata?.title || url;
-        setPrompt(`Clone this website: ${title}`);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to scrape URL";
-      setError(message);
-    } finally {
-      setScraping(false);
+    const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+    const clonePrompt = prompt.trim() || `Clone this website: ${url}`;
+
+    try {
+      sessionStorage.setItem(
+        "vibe-pending-generation",
+        JSON.stringify({
+          prompt: clonePrompt,
+          model,
+          images: [],
+          scrapeUrl: fullUrl,
+        })
+      );
+    } catch {
+      // sessionStorage might fail
     }
+
+    window.location.href = "/generate/new";
   };
 
   const handleGenerate = () => {
@@ -132,7 +115,6 @@ export default function VibeSitePage() {
           prompt: trimmed,
           model,
           images: imageDataUrls,
-          ...(scrapeData ? { scrapeData } : {}),
         })
       );
     } catch {
@@ -232,30 +214,14 @@ export default function VibeSitePage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        handleScrapeUrl();
+                        handleCloneUrl();
                       }
                     }}
                   />
-                  {scrapeData && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setScrapeData(null);
-                        setScrapeScreenshot("");
-                        setCloneUrl("");
-                      }}
-                      className="text-gray-400 hover:text-gray-600 transition-colors"
-                      title="Clear scrape data"
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
                 </div>
                 <button
                   type="button"
-                  onClick={handleScrapeUrl}
+                  onClick={handleCloneUrl}
                   disabled={!cloneUrl.trim() || scraping}
                   className="flex items-center gap-1.5 rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                 >
@@ -277,22 +243,6 @@ export default function VibeSitePage() {
                   )}
                 </button>
               </div>
-              {scrapeScreenshot && (
-                <div className="px-4 py-2">
-                  <div className="relative rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
-                    <img
-                      src={scrapeScreenshot}
-                      alt="Website screenshot"
-                      className="w-full max-h-40 object-cover object-top"
-                    />
-                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/50 to-transparent px-3 py-1.5">
-                      <p className="text-xs text-white font-medium truncate">
-                        {(scrapeData as Record<string, unknown> & { metadata?: { title?: string } })?.metadata?.title || cloneUrl}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
@@ -427,44 +377,29 @@ export default function VibeSitePage() {
         <div className="max-w-[1200px] mx-auto">
           {/* Projects header */}
           <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-0">
-              {(
-                [
-                  { key: "recently-viewed", label: "Recently viewed" },
-                  { key: "my-projects", label: "My projects" },
-                  { key: "templates", label: "Templates" },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setProjectsTab(tab.key)}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    projectsTab === tab.key
-                      ? "text-gray-900 bg-white shadow-sm border border-gray-200"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <button className="flex items-center gap-1 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
-              Browse all
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+            <h2 className="text-base font-semibold text-gray-900">My projects</h2>
+            {projects.length > 0 && (
+              <button
+                onClick={() => router.push("/projects")}
+                className="flex items-center gap-1 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M17.25 8.25L21 12m0 0l-3.75 3.75M21 12H3"
-                />
-              </svg>
-            </button>
+                Browse all
+                <svg
+                  width="16"
+                  height="16"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M17.25 8.25L21 12m0 0l-3.75 3.75M21 12H3"
+                  />
+                </svg>
+              </button>
+            )}
           </div>
 
           {/* Projects grid */}
@@ -511,39 +446,25 @@ export default function VibeSitePage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {projects.map((project) => (
+              {projects.slice(0, 32).map((project) => (
                 <button
                   key={project.id}
                   onClick={() => router.push(`/generate/${project.id}`)}
                   className="group text-left rounded-xl overflow-hidden bg-white border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200"
                 >
-                  {/* Preview thumbnail */}
+                  {/* Preview thumbnail (cached snapshot) */}
                   <div className="relative h-44 bg-gray-50 overflow-hidden">
-                    {project.isReactProject ? (
-                      <iframe
-                        src={`/preview-react/${project.id}`}
-                        className="w-[1440px] h-[900px] border-0 pointer-events-none"
-                        style={{
-                          transform: "scale(0.2)",
-                          transformOrigin: "top left",
-                        }}
-                        title={project.name}
-                        tabIndex={-1}
-                        loading="lazy"
-                      />
-                    ) : (
-                      <iframe
-                        src={`/preview/${project.id}/${project.previewSlug}/`}
-                        className="w-[1440px] h-[900px] border-0 pointer-events-none"
-                        style={{
-                          transform: "scale(0.2)",
-                          transformOrigin: "top left",
-                        }}
-                        title={project.firstPageTitle}
-                        tabIndex={-1}
-                        loading="lazy"
-                      />
-                    )}
+                    <iframe
+                      src={`/api/funnel/${project.id}/snapshot`}
+                      className="w-[1440px] h-[900px] border-0 pointer-events-none"
+                      style={{
+                        transform: "scale(0.2)",
+                        transformOrigin: "top left",
+                      }}
+                      title={project.name}
+                      tabIndex={-1}
+                      loading="lazy"
+                    />
                     {/* Hover overlay */}
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
                   </div>

@@ -202,6 +202,34 @@ export default function GenerateResultPage() {
   const [codeLoading, setCodeLoading] = useState(false);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
 
+  // Snapshot capture ref to track if we need to capture
+  const snapshotPendingRef = useRef(false);
+
+  // Capture snapshot from Sandpack iframe and save it
+  const captureSnapshot = useCallback((funnelId: string) => {
+    // Wait for Sandpack to finish rendering
+    setTimeout(() => {
+      const iframe = document.querySelector('.sp-preview-iframe') as HTMLIFrameElement;
+      if (!iframe) return;
+
+      const handleMessage = (e: MessageEvent) => {
+        if (e.data && e.data.type === "html-snapshot" && e.data.html) {
+          window.removeEventListener("message", handleMessage);
+          fetch(`/api/funnel/${funnelId}/snapshot`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ html: e.data.html }),
+          }).catch(() => { /* silent fail */ });
+        }
+      };
+      window.addEventListener("message", handleMessage);
+      iframe.contentWindow?.postMessage({ type: "capture-html" }, "*");
+
+      // Cleanup listener after 10s if no response
+      setTimeout(() => window.removeEventListener("message", handleMessage), 10000);
+    }, 4000);
+  }, []);
+
   // Project files for Sandpack preview
   const projectFiles = funnel?.files || null;
 
@@ -264,6 +292,9 @@ export default function GenerateResultPage() {
         setEditModel(funnelData.model);
         setGeneratingState("idle");
         setLoading(false);
+
+        // Capture snapshot after Sandpack renders
+        captureSnapshot(data.id);
       } catch (err: unknown) {
         if (progressTimerRef.current) clearInterval(progressTimerRef.current);
         if (stepTimerRef.current) clearInterval(stepTimerRef.current);
@@ -280,7 +311,7 @@ export default function GenerateResultPage() {
         generateAbortRef.current = null;
       }
     },
-    []
+    [captureSnapshot]
   );
 
   useEffect(() => {
@@ -289,14 +320,93 @@ export default function GenerateResultPage() {
       const stored = sessionStorage.getItem("vibe-pending-generation");
       if (stored) {
         sessionStorage.removeItem("vibe-pending-generation");
-        const { prompt, model, images, scrapeData } = JSON.parse(stored);
+        const { prompt, model, images, scrapeData, scrapeUrl } = JSON.parse(stored);
         setPendingPrompt(prompt);
         setPendingModel(model);
         if (Array.isArray(images) && images.length > 0) {
           setPendingPromptImages(images);
         }
         setLoading(false);
-        startGeneration(prompt, model, images, scrapeData || undefined);
+
+        if (scrapeUrl) {
+          // Scrape first, then generate with scrape data
+          (async () => {
+            setGeneratingState("generating");
+            setGenerationStep(0);
+            setGenerationProgress(0);
+            let step = 0;
+            stepTimerRef.current = setInterval(() => {
+              step = (step + 1) % GENERATION_STEPS.length;
+              setGenerationStep(step);
+            }, 3500);
+            let progress = 0;
+            progressTimerRef.current = setInterval(() => {
+              progress += 0.3 + Math.random() * 0.4;
+              if (progress > 85) progress = 85;
+              setGenerationProgress(progress);
+            }, 200);
+
+            try {
+              const scrapeRes = await fetch("/api/scrape", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: scrapeUrl }),
+              });
+              const scrapeResult = await scrapeRes.json();
+              if (!scrapeRes.ok) throw new Error(scrapeResult.error || "Failed to scrape URL");
+
+              const scrapeImages = scrapeResult.screenshot ? [scrapeResult.screenshot] : [];
+              if (scrapeImages.length > 0) {
+                setPendingPromptImages(scrapeImages);
+              }
+
+              // Now generate with scrape data
+              const genRes = await fetch("/api/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  prompt,
+                  model,
+                  images: scrapeImages,
+                  scrapeData: scrapeResult,
+                }),
+              });
+              const genData = await genRes.json();
+              if (!genRes.ok) throw new Error(genData.error || "Failed to generate");
+
+              if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+              if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+              setGenerationProgress(100);
+              await new Promise((r) => setTimeout(r, 600));
+
+              window.history.replaceState(null, "", `/generate/${genData.id}`);
+              const funnelRes = await fetch(`/api/funnel/${genData.id}`);
+              if (!funnelRes.ok) throw new Error("Failed to load funnel");
+              const funnelData = await funnelRes.json();
+
+              setFunnel(funnelData);
+              setChatMessages(funnelData.chatHistory || []);
+              setEditModel(funnelData.model);
+              setGeneratingState("idle");
+              setLoading(false);
+
+              // Capture snapshot after Sandpack renders
+              captureSnapshot(genData.id);
+            } catch (err: unknown) {
+              if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+              if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+              if (err instanceof DOMException && err.name === "AbortError") {
+                setGeneratingState("aborted");
+              } else {
+                const message = err instanceof Error ? err.message : "Something went wrong";
+                setError(message);
+                setGeneratingState("error");
+              }
+            }
+          })();
+        } else {
+          startGeneration(prompt, model, images, scrapeData || undefined);
+        }
       } else {
         // No pending data, go back
         router.replace("/");
@@ -458,6 +568,9 @@ export default function GenerateResultPage() {
       }
 
       setRefreshKey((prev) => prev + 1);
+
+      // Re-capture snapshot after edit
+      captureSnapshot(funnel.id);
 
       // Refresh code files if in code view
       if (viewMode === "code") {

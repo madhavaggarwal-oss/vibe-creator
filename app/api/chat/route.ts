@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { editFunnel } from "@/lib/gemini";
 import { getFunnel, saveFunnel, isReactProject } from "@/lib/storage";
+import { processImageMarkers } from "@/lib/image-gen";
+import fs from "fs/promises";
+import path from "path";
 
 export async function POST(request: NextRequest) {
   try {
@@ -57,6 +60,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Process image markers in changed files
+    const hasMarkers = Object.values(updatedFiles).some(
+      (v) => typeof v === "string" && /__IMG/.test(v)
+    );
+    const finalFiles = hasMarkers
+      ? await processImageMarkers(updatedFiles)
+      : updatedFiles;
+
     // Update chat history
     const chatHistory = [...funnel.chatHistory];
     chatHistory.push({
@@ -74,9 +85,16 @@ export async function POST(request: NextRequest) {
     // Save updated funnel
     await saveFunnel({
       ...funnel,
-      files: updatedFiles,
+      files: finalFiles,
       chatHistory,
     });
+
+    // Invalidate cached snapshot so it gets re-captured
+    try {
+      await fs.unlink(path.join(process.cwd(), "data", "snapshots", `${funnelId}.html`));
+    } catch {
+      // File may not exist — that's fine
+    }
 
     return NextResponse.json({
       message: result.message,

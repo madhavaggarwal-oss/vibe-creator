@@ -35,6 +35,7 @@ yarn-error.log*
 
 # generated data
 /data/*.json
+/data/snapshots/
 
 # vercel
 .vercel
