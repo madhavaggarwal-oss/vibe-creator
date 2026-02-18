@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 40 user stories | 19 Built | 5 Partial | 16 Pending**
+**Total: 41 user stories | 20 Built | 5 Partial | 16 Pending**
 
 ---
 
@@ -583,13 +583,13 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - [x] Preview mode: Live Sandpack rendering of the React project (default)
 - [x] Code mode: Syntax-highlighted source code with file tree sidebar
 - [ ] Design mode: Preview with interactive element selection overlay (see US-4.5)
-- [ ] Active mode shows icon + label; inactive modes show only icons (compact toggle)
+- [x] Active mode shows icon + label; inactive modes show only icons (compact toggle)
 - [x] Smooth visual transition between modes
 - [ ] Keyboard shortcuts: Cmd/Ctrl+1 (Preview), Cmd/Ctrl+2 (Code), Cmd/Ctrl+3 (Design)
 
 **Files:** `app/generate/[id]/page.tsx`
 
-**Implementation Notes:** Currently both Preview and Code always show their labels. Need to add Design mode button and icon-only rendering for inactive states.
+**Implementation Notes:** Preview and Code now use compact toggle (selected shows icon+label, unselected shows icon only). Design mode button still needed.
 
 ---
 
@@ -661,6 +661,25 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - [ ] Published sites are static exports of the React project
 
 **Implementation Notes:** Requires a deployment target (Vercel, Netlify, custom hosting). Could start with Vercel Blob static hosting or a simple static file server. This is an architectural decision.
+
+---
+
+### US-7.6: Generate Page UI Redesign `BUILT`
+**As a** user, **I want** the editor page to have a clean, modern look with clear visual separation between chat and canvas **so that** the interface feels polished and professional.
+
+**Acceptance Criteria:**
+- [x] Top bar and chat panel share unified `#F9FAFB` background (no dividing borders between them)
+- [x] Canvas area distinguished by its own subtle grey border with `rounded-2xl` corners
+- [x] No border between chat panel and canvas — separated by color difference only
+- [x] Chat input area seamless with chat messages (no border-top divider), white input on light bg
+- [x] Preview/Code as separate individual tab buttons (each with own rounded border)
+- [x] Center pill bar in top bar: device cycle toggle (click to cycle desktop→tablet→mobile, icon changes), page selector (always shown), open-in-tab, refresh
+- [x] All top bar icons use `strokeWidth={2}` and darker colors (`text-gray-500`/`text-gray-600`) for better visibility
+- [x] Uniform `h-8` height across all top bar buttons (Preview, Code, Share, Publish)
+- [x] Text bumped to `text-sm` for project name, toggles, and action buttons
+- [x] Hero section on main page uses `83vh` min-height for better visual balance
+
+**Files:** `app/generate/[id]/page.tsx`, `components/vibe-site-page.tsx`
 
 ---
 
@@ -865,12 +884,12 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 4. Prompt Box (Canvas) | 5 | 2 | 1 | 2 |
 | 5. Chat Features | 6 | 0 | 1 | 5 |
 | 6. Context Management | 1 | 0 | 0 | 1 |
-| 7. Canvas Top Bar | 5 | 2 | 1 | 2 |
+| 7. Canvas Top Bar | 6 | 3 | 1 | 2 |
 | 8. Code View & Export | 2 | 2 | 0 | 0 |
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
 | 10. Error Handling & Resilience | 1 | 1 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **40** | **19** | **5** | **16** |
+| **TOTAL** | **41** | **20** | **5** | **16** |
 
 ---
 
