@@ -185,6 +185,12 @@ export default function GenerateResultPage() {
   const [editModel, setEditModel] = useState<string>("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [chatCollapsed, setChatCollapsed] = useState(false);
+  const [chatWidth, setChatWidth] = useState(320);
+  const [isResizing, setIsResizing] = useState(false);
+  const chatWidthRef = useRef(320);
+  const chatMinWidth = 280;
+  const chatMaxWidth = 500;
+  const chatDefaultWidth = 320;
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [chatPendingImages, setChatPendingImages] = useState<PendingImage[]>([]);
@@ -201,6 +207,64 @@ export default function GenerateResultPage() {
   const [fileSearchQuery, setFileSearchQuery] = useState("");
   const [codeLoading, setCodeLoading] = useState(false);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
+
+  // Restore chat width from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("vibe-chat-width");
+      if (saved) {
+        const w = Math.max(chatMinWidth, Math.min(chatMaxWidth, Number(saved)));
+        setChatWidth(w);
+        chatWidthRef.current = w;
+      }
+    } catch {}
+  }, []);
+
+  // Resize drag handler — uses refs to avoid stale closures
+  const isResizingRef = useRef(false);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      e.preventDefault();
+      const chatPanel = document.getElementById("chat-panel");
+      if (!chatPanel) return;
+      const rect = chatPanel.getBoundingClientRect();
+      const newWidth = Math.max(chatMinWidth, Math.min(chatMaxWidth, e.clientX - rect.left));
+      setChatWidth(newWidth);
+      chatWidthRef.current = newWidth;
+    };
+
+    const onMouseUp = () => {
+      if (!isResizingRef.current) return;
+      isResizingRef.current = false;
+      setIsResizing(false);
+      document.body.style.cursor = "";
+      try { localStorage.setItem("vibe-chat-width", String(chatWidthRef.current)); } catch {}
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizingRef.current = true;
+    setIsResizing(true);
+    document.body.style.cursor = "col-resize";
+  }, []);
+
+  // Double-click divider to reset width
+  const handleResizeDoubleClick = useCallback(() => {
+    setChatWidth(chatDefaultWidth);
+    chatWidthRef.current = chatDefaultWidth;
+    try { localStorage.setItem("vibe-chat-width", String(chatDefaultWidth)); } catch {}
+  }, []);
 
   // Snapshot capture ref to track if we need to capture
   const snapshotPendingRef = useRef(false);
@@ -867,11 +931,11 @@ export default function GenerateResultPage() {
   const projectName = funnel?.name || pendingPrompt?.slice(0, 30) || "Untitled Project";
 
   return (
-    <div className="flex h-screen flex-col bg-white overflow-hidden">
+    <div className={`flex h-screen flex-col bg-white overflow-hidden ${isResizing ? "select-none" : ""}`}>
       {/* Top bar */}
       <header className="flex items-center bg-[#F9FAFB] shrink-0 h-14">
         {/* Left zone - Project name (above chat panel) */}
-        <div className={`flex items-center justify-between shrink-0 px-3 h-full transition-all ${chatCollapsed ? "w-12" : "w-80"}`}>
+        <div className={`flex items-center justify-between shrink-0 px-3 h-full ${chatCollapsed ? "w-12 transition-all" : ""}`} style={chatCollapsed ? undefined : { width: chatWidth }}>
           {!chatCollapsed && (
             <>
               <div className="flex items-center gap-1.5 min-w-0">
@@ -1085,7 +1149,7 @@ export default function GenerateResultPage() {
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Chat panel (left) */}
-        <div className={`flex shrink-0 flex-col bg-[#F9FAFB] transition-all duration-200 ${chatCollapsed ? "w-0 overflow-hidden" : "w-80"}`}>
+        <div id="chat-panel" className={`flex shrink-0 flex-col bg-[#F9FAFB] ${chatCollapsed ? "w-0 overflow-hidden transition-all duration-200" : ""}`} style={chatCollapsed ? undefined : { width: chatWidth }}>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {/* Show prompt for generating/aborted state */}
@@ -1285,8 +1349,22 @@ export default function GenerateResultPage() {
           </div>
         </div>
 
+        {/* Resize handle — overlaps canvas left edge, invisible */}
+        {!chatCollapsed && (
+          <div
+            className="shrink-0 w-0 relative z-20"
+          >
+            <div
+              className="absolute top-0 bottom-0 w-4 cursor-col-resize"
+              style={{ left: 10 }}
+              onMouseDown={handleResizeStart}
+              onDoubleClick={handleResizeDoubleClick}
+            />
+          </div>
+        )}
+
         {/* Canvas (right) */}
-        <div className="flex flex-1 flex-col items-center justify-center bg-[#F9FAFB] overflow-hidden pt-1 px-3 pb-3">
+        <div className={`flex flex-1 flex-col items-center justify-center bg-[#F9FAFB] overflow-hidden pt-1 px-3 pb-3 ${isResizing ? "pointer-events-none" : ""}`}>
           {/* ── Generating animation in canvas ── */}
           {isGenerating && (
             <div className="relative w-full h-full rounded-2xl border border-gray-200 bg-white shadow-lg overflow-hidden">
