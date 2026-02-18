@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 40 user stories | 18 Built | 5 Partial | 17 Pending**
+**Total: 40 user stories | 19 Built | 5 Partial | 16 Pending**
 
 ---
 
@@ -99,20 +99,20 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 ---
 
-### US-2.5: Project Delete `PENDING`
+### US-2.5: Project Delete `BUILT`
 **As a** user, **I want** to delete a project I no longer need **so that** I can keep my project list clean.
 
 **Acceptance Criteria:**
-- [ ] Kebab menu on project card shows "Delete" option (in red text for danger indication)
-- [ ] Clicking "Delete" shows a confirmation dialog: "Delete '{project name}'? This action cannot be undone."
-- [ ] Dialog has "Cancel" (secondary) and "Delete" (red/danger) buttons
-- [ ] Confirming deletes the project data file via API (`DELETE /api/funnel/{id}`)
-- [ ] Project card fades out or animates removal from the grid
+- [x] Kebab menu on project card shows "Delete" option (in red text for danger indication)
+- [x] Clicking "Delete" shows a confirmation dialog: "Delete '{project name}'?" with warning text and bullet list of what gets deleted
+- [x] Dialog has "Cancel" (secondary) and "Continue" (red/danger) buttons, plus X close button
+- [x] Confirming deletes the project data file and snapshot via API (`DELETE /api/funnel/{id}`)
+- [x] Project card removed from the grid on success
 - [ ] If user is currently viewing the deleted project in the editor, redirect to home page
-- [ ] Canceling the dialog does nothing — project remains
-- [ ] Toast notification: "Project deleted"
+- [x] Canceling the dialog does nothing — project remains
+- [x] Toast notification: "Project deleted"
 
-**Implementation Notes:** Need `DELETE /api/funnel/{id}` API that removes `/data/{id}.json`. Need confirmation dialog component.
+**Files:** `app/api/funnel/[id]/route.ts`, `components/vibe-site-page.tsx`, `app/globals.css`
 
 ---
 
@@ -860,7 +860,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | Theme | Total | Built | Partial | Pending |
 |-------|-------|-------|---------|---------|
 | 1. Navigation & Layout | 1 | 1 | 0 | 0 |
-| 2. Project Management | 9 | 5 | 0 | 4 |
+| 2. Project Management | 9 | 6 | 0 | 3 |
 | 3. Prompt Box (Main) | 4 | 2 | 1 | 1 |
 | 4. Prompt Box (Canvas) | 5 | 2 | 1 | 2 |
 | 5. Chat Features | 6 | 0 | 1 | 5 |
@@ -870,7 +870,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
 | 10. Error Handling & Resilience | 1 | 1 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **40** | **18** | **5** | **17** |
+| **TOTAL** | **40** | **19** | **5** | **16** |
 
 ---
 

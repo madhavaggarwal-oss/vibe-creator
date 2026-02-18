@@ -35,6 +35,12 @@ export default function VibeSitePage() {
   const [cloneUrl, setCloneUrl] = useState("");
   const [scraping] = useState(false);
 
+  // Delete state
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<FunnelProject | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
   useEffect(() => {
     async function loadProjects() {
       try {
@@ -139,6 +145,24 @@ export default function VibeSitePage() {
     if (diffDays < 30)
       return `Edited ${diffDays} days ago`;
     return `Edited ${date.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
+  };
+
+  const handleDeleteProject = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/funnel/${deleteTarget.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setProjects((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+        setToast("Project deleted");
+        setTimeout(() => setToast(null), 3000);
+      }
+    } catch {
+      // silent fail
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
+    }
   };
 
   return (
@@ -448,13 +472,13 @@ export default function VibeSitePage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               {projects.slice(0, 32).map((project) => (
-                <button
+                <div
                   key={project.id}
+                  className="group relative text-left rounded-xl bg-white border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 cursor-pointer"
                   onClick={() => router.push(`/generate/${project.id}`)}
-                  className="group text-left rounded-xl overflow-hidden bg-white border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200"
                 >
                   {/* Preview thumbnail */}
-                  <div className="relative h-44 bg-gray-50 overflow-hidden">
+                  <div className="relative h-44 bg-gray-50 overflow-hidden rounded-t-xl">
                     <iframe
                       src={project.hasSnapshot
                         ? `/api/funnel/${project.id}/snapshot`
@@ -471,25 +495,128 @@ export default function VibeSitePage() {
                       tabIndex={-1}
                       loading="lazy"
                     />
-                    {/* Hover overlay */}
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
                   </div>
 
-                  {/* Project info */}
-                  <div className="px-4 py-3.5">
-                    <p className="text-sm font-semibold text-gray-800 truncate">
-                      {project.name}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {formatDate(project.createdAt)}
-                    </p>
+                  {/* Project info + kebab menu */}
+                  <div className="flex items-start justify-between px-4 py-3.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-800 truncate">
+                        {project.name}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {formatDate(project.createdAt)}
+                      </p>
+                    </div>
+
+                    {/* Kebab menu */}
+                    <div className="relative shrink-0 ml-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpenId(menuOpenId === project.id ? null : project.id);
+                        }}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-gray-100 hover:text-gray-600 transition-all"
+                      >
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                          <circle cx="8" cy="3" r="1.5" />
+                          <circle cx="8" cy="8" r="1.5" />
+                          <circle cx="8" cy="13" r="1.5" />
+                        </svg>
+                      </button>
+
+                      {menuOpenId === project.id && (
+                        <>
+                          <div className="fixed inset-0 z-20" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); }} />
+                          <div className="absolute right-0 top-full mt-1 z-30 w-36 rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMenuOpenId(null);
+                                setDeleteTarget(project);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                            >
+                              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                              </svg>
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Delete confirmation dialog */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div
+            className="w-full max-w-md rounded-2xl bg-white px-7 py-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header with close button */}
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="text-xl font-bold text-gray-900">
+                Delete {deleteTarget.name}?
+              </h3>
+              <button
+                onClick={() => !deleting && setDeleteTarget(null)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors -mr-1 -mt-1"
+              >
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <p className="text-[15px] text-gray-600 leading-relaxed">
+              This action cannot be undone.{" "}
+              <span className="text-red-600 font-medium">This will permanently delete your project.</span>{" "}
+              Including:
+            </p>
+            <ul className="mt-3 mb-6 ml-1 space-y-1.5 text-[15px] text-gray-600 list-disc list-inside">
+              <li>All project files and chat history</li>
+              <li>All preview links</li>
+            </ul>
+
+            {/* Buttons */}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteProject}
+                disabled={deleting}
+                className="rounded-lg bg-red-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-red-800 transition-colors disabled:opacity-60"
+              >
+                {deleting ? "Deleting..." : "Continue"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg bg-gray-800 px-4 py-2.5 text-sm text-white shadow-lg animate-[fadeInUp_0.2s_ease-out]">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
