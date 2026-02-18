@@ -168,7 +168,7 @@ export default function VibeSitePage() {
   return (
     <div className="flex flex-col h-full">
       {/* Hero section with animated background */}
-      <div className="relative overflow-hidden" style={{ minHeight: "60vh" }}>
+      <div className="relative overflow-hidden" style={{ minHeight: "83vh" }}>
         {/* Animated gradient background */}
         <div className="absolute inset-0 vibe-animated-bg">
           {/* Moving gradient overlay */}
@@ -189,7 +189,7 @@ export default function VibeSitePage() {
         </div>
 
         {/* Content */}
-        <div className="relative z-10 flex flex-col items-center justify-center px-6 py-20" style={{ minHeight: "60vh" }}>
+        <div className="relative z-10 flex flex-col items-center justify-center px-6 py-20" style={{ minHeight: "83vh" }}>
           {/* Badge */}
           <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-white/70 backdrop-blur-sm border border-gray-200/60 px-4 py-1.5 shadow-sm">
             <span className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#FEC403] via-[#2896FB] to-[#4BCF29] px-2 py-0.5 text-[10px] font-bold text-white">
