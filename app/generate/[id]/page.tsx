@@ -85,6 +85,17 @@ const GENERATION_STEPS = [
   { label: "Finalizing your project", icon: "check", duration: 5000 },
 ];
 
+const SIMULATED_CODE_FILES = [
+  { path: "/index.html", name: "index.html", code: `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8" />\n  <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n  <title>Project</title>\n</head>\n<body>\n  <div id="root"></div>\n  <script type="module" src="/src/index.tsx"></script>\n</body>\n</html>` },
+  { path: "/src/index.tsx", name: "index.tsx", code: `import React from "react";\nimport ReactDOM from "react-dom/client";\nimport { HashRouter } from "react-router-dom";\nimport App from "./App";\nimport "./index.css";\n\nReactDOM.createRoot(\n  document.getElementById("root")!\n).render(\n  <React.StrictMode>\n    <HashRouter>\n      <App />\n    </HashRouter>\n  </React.StrictMode>\n);` },
+  { path: "/src/App.tsx", name: "App.tsx", code: `import React from "react";\nimport { Routes, Route } from "react-router-dom";\nimport Header from "./components/Header";\nimport Footer from "./components/Footer";\nimport Home from "./pages/Home";\n\nexport default function App() {\n  return (\n    <div className="min-h-screen flex flex-col">\n      <Header />\n      <main className="flex-1">\n        <Routes>\n          <Route path="/" element={<Home />} />\n        </Routes>\n      </main>\n      <Footer />\n    </div>\n  );\n}` },
+  { path: "/src/index.css", name: "index.css", code: `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n:root {\n  --primary: #3b82f6;\n  --secondary: #10b981;\n}\n\nbody {\n  margin: 0;\n  font-family: system-ui, sans-serif;\n  -webkit-font-smoothing: antialiased;\n}\n\n.gradient-bg {\n  background: linear-gradient(\n    135deg,\n    var(--primary),\n    var(--secondary)\n  );\n}` },
+  { path: "/src/pages/Home.tsx", name: "Home.tsx", code: `import React from "react";\nimport Hero from "../components/Hero";\n\nexport default function Home() {\n  return (\n    <div>\n      <Hero />\n      <section className="py-16 px-6">\n        <div className="max-w-6xl mx-auto">\n          <h2 className="text-3xl font-bold\n            text-center mb-12">\n            Featured Content\n          </h2>\n          <div className="grid grid-cols-1\n            md:grid-cols-3 gap-8">\n            {/* Cards */}\n          </div>\n        </div>\n      </section>\n    </div>\n  );\n}` },
+  { path: "/src/components/Header.tsx", name: "Header.tsx", code: `import React, { useState } from "react";\nimport { Link } from "react-router-dom";\n\nexport default function Header() {\n  const [isOpen, setIsOpen] = useState(false);\n\n  return (\n    <header className="bg-white shadow-sm\n      sticky top-0 z-50">\n      <nav className="max-w-6xl mx-auto\n        px-6 py-4 flex items-center\n        justify-between">\n        <Link to="/" className="text-xl\n          font-bold text-gray-900">\n          Brand\n        </Link>\n        <div className="hidden md:flex\n          items-center gap-6">\n          <Link to="/" className="text-gray-600\n            hover:text-gray-900">Home</Link>\n          <Link to="/about" className="text-gray-600\n            hover:text-gray-900">About</Link>\n        </div>\n      </nav>\n    </header>\n  );\n}` },
+  { path: "/src/components/Hero.tsx", name: "Hero.tsx", code: `import React from "react";\n\nexport default function Hero() {\n  return (\n    <section className="gradient-bg\n      text-white py-24 px-6">\n      <div className="max-w-4xl mx-auto\n        text-center">\n        <h1 className="text-5xl font-bold\n          mb-6 leading-tight">\n          Welcome to Your\n          New Website\n        </h1>\n        <p className="text-xl opacity-90\n          mb-8 max-w-2xl mx-auto">\n          Built with React and\n          Tailwind CSS\n        </p>\n        <button className="bg-white\n          text-blue-600 px-8 py-3\n          rounded-full font-semibold\n          hover:shadow-lg transition">\n          Get Started\n        </button>\n      </div>\n    </section>\n  );\n}` },
+  { path: "/src/components/Footer.tsx", name: "Footer.tsx", code: `import React from "react";\n\nexport default function Footer() {\n  return (\n    <footer className="bg-gray-900\n      text-gray-400 py-12 px-6">\n      <div className="max-w-6xl mx-auto\n        flex flex-col md:flex-row\n        justify-between items-center\n        gap-4">\n        <p className="text-sm">\n          &copy; {new Date().getFullYear()}\n          All rights reserved.\n        </p>\n        <div className="flex gap-6\n          text-sm">\n          <a href="#" className="hover:text-white\n            transition">Privacy</a>\n          <a href="#" className="hover:text-white\n            transition">Terms</a>\n        </div>\n      </div>\n    </footer>\n  );\n}` },
+];
+
 type GeneratingState = "idle" | "generating" | "aborted" | "error";
 
 function getFileLanguage(filePath: string): string {
@@ -195,6 +206,10 @@ export default function GenerateResultPage() {
   const chatDefaultWidth = 320;
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Simulated code animation state
+  const [simFileIndex, setSimFileIndex] = useState(0);
+  const [simTypedChars, setSimTypedChars] = useState(0);
   const [chatPendingImages, setChatPendingImages] = useState<PendingImage[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
   const [pendingPromptImages, setPendingPromptImages] = useState<string[]>([]);
@@ -221,6 +236,36 @@ export default function GenerateResultPage() {
       }
     } catch {}
   }, []);
+
+  // Simulated code-writing animation during generation
+  const isSimGenerating = generatingState === "generating";
+  useEffect(() => {
+    if (!isSimGenerating || viewMode !== "code") return;
+    const currentFile = SIMULATED_CODE_FILES[simFileIndex];
+    if (!currentFile) return;
+    if (simTypedChars < currentFile.code.length) {
+      const typeTimer = setTimeout(() => {
+        setSimTypedChars((c) => Math.min(c + 2, currentFile.code.length));
+      }, 25);
+      return () => clearTimeout(typeTimer);
+    } else {
+      const nextTimer = setTimeout(() => {
+        if (simFileIndex < SIMULATED_CODE_FILES.length - 1) {
+          setSimFileIndex((i) => i + 1);
+          setSimTypedChars(0);
+        }
+      }, 800);
+      return () => clearTimeout(nextTimer);
+    }
+  }, [isSimGenerating, viewMode, simFileIndex, simTypedChars]);
+
+  // Reset simulation when generation completes
+  useEffect(() => {
+    if (!isSimGenerating) {
+      setSimFileIndex(0);
+      setSimTypedChars(0);
+    }
+  }, [isSimGenerating]);
 
   // Close project menu on click outside
   useEffect(() => {
@@ -945,7 +990,7 @@ export default function GenerateResultPage() {
       {/* Top bar */}
       <header className="flex items-center bg-[#F9FAFB] shrink-0 h-14">
         {/* Left zone - Project name (above chat panel) */}
-        <div className="flex items-center shrink-0 pl-5 pr-3 h-full gap-2" style={{ width: chatCollapsed ? undefined : chatWidth }}>
+        <div className="flex items-center shrink-0 pl-6 pr-3 h-full gap-2" style={{ width: chatCollapsed ? undefined : chatWidth }}>
           {/* Sparkle logo + project name — always visible */}
           <div className="relative flex items-center gap-2 min-w-0" ref={projectMenuRef}>
             <button
@@ -1032,14 +1077,14 @@ export default function GenerateResultPage() {
 
           {/* Center controls — pill bar */}
           <div className="flex items-center">
-            {isReady && funnel && viewMode === "code" ? (
+            {viewMode === "code" ? (
               <div className="flex items-center gap-1.5 text-xs text-gray-500">
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
                 </svg>
-                <span className="font-medium text-gray-700">{fileCount} files</span>
+                <span className="font-medium text-gray-700">{isGenerating ? "Building..." : `${fileCount} files`}</span>
               </div>
-            ) : isReady && funnel && viewMode === "preview" ? (
+            ) : viewMode === "preview" ? (
               <div className="flex items-center rounded-full border border-gray-200 bg-white px-1.5 py-1 gap-1 min-w-[280px]">
                 {/* Device toggle — click to cycle */}
                 <button
@@ -1111,22 +1156,6 @@ export default function GenerateResultPage() {
                   </svg>
                 </button>
               </div>
-            ) : isGenerating ? (
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <div className="h-2 w-2 rounded-full bg-[#2896FB] animate-pulse" />
-                  Generating...
-                </div>
-                <button
-                  onClick={handleAbortGeneration}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-100 hover:border-red-300 transition-all"
-                >
-                  <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
-                  </svg>
-                  Stop
-                </button>
-              </div>
             ) : null}
           </div>
 
@@ -1144,13 +1173,21 @@ export default function GenerateResultPage() {
               </button>
             ) : (
               <>
-                <button className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 h-8 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                <button
+                  disabled={isGenerating}
+                  title={isGenerating ? "Creation in Progress" : undefined}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 h-8 text-sm font-medium text-gray-700 transition-colors ${isGenerating ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-50"}`}
+                >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
                   </svg>
                   Share
                 </button>
-                <button className="inline-flex items-center rounded-lg bg-blue-600 px-5 h-8 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all">
+                <button
+                  disabled={isGenerating}
+                  title={isGenerating ? "Creation in Progress" : undefined}
+                  className={`inline-flex items-center rounded-lg bg-blue-600 px-5 h-8 text-sm font-semibold text-white shadow-sm transition-all ${isGenerating ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-700"}`}
+                >
                   Publish
                 </button>
               </>
@@ -1165,7 +1202,7 @@ export default function GenerateResultPage() {
         <div id="chat-panel" className={`shrink-0 bg-[#F9FAFB] overflow-hidden ${isResizing ? "" : "transition-all duration-150 ease-in-out"}`} style={{ width: chatCollapsed ? 0 : chatWidth }}>
           <div className="flex flex-col h-full" style={{ width: chatWidth }}>
 
-          <div className="flex-1 overflow-y-auto pl-5 pr-3 py-4 space-y-3 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto pl-6 pr-3 py-4 space-y-3 scrollbar-thin">
             {/* Show prompt for generating/aborted state */}
             {(isGenerating || isAborted) && pendingPrompt && (
               <>
@@ -1275,18 +1312,43 @@ export default function GenerateResultPage() {
           </div>
 
           {/* Chat input */}
-          <div className="bg-[#F9FAFB] pl-5 pr-3 py-3">
+          <div className="bg-[#F9FAFB] pl-6 pr-3 py-3">
             {isGenerating ? (
-              <button
-                type="button"
-                onClick={handleAbortGeneration}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-600 transition-all hover:bg-red-100 hover:border-red-300"
-              >
-                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-                Stop generating
-              </button>
+              <form className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 transition-all" onSubmit={(e) => e.preventDefault()}>
+                <input
+                  ref={chatFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled
+                  title="Creation in Progress"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-50 cursor-not-allowed"
+                >
+                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                </button>
+                <input
+                  type="text"
+                  disabled
+                  placeholder="Describe changes you want..."
+                  className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none cursor-not-allowed"
+                />
+                <button
+                  type="button"
+                  onClick={handleAbortGeneration}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white transition-all hover:bg-black"
+                  title="Stop generation"
+                >
+                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="4" y="4" width="16" height="16" rx="2" />
+                  </svg>
+                </button>
+              </form>
             ) : isAborted ? (
               <div className="flex items-center gap-2">
                 <button
@@ -1389,8 +1451,8 @@ export default function GenerateResultPage() {
 
         {/* Canvas (right) */}
         <div className={`flex flex-1 flex-col items-center justify-center bg-[#F9FAFB] overflow-hidden pt-1 px-3 pb-3 ${isResizing ? "pointer-events-none" : ""}`}>
-          {/* ── Generating animation in canvas ── */}
-          {isGenerating && (
+          {/* ── Generating animation in canvas (preview mode only) ── */}
+          {isGenerating && viewMode === "preview" && (
             <div className="relative w-full h-full rounded-2xl border border-gray-200 bg-white shadow-lg overflow-hidden">
               {/* Animated gradient background */}
               <div className="absolute inset-0 vibe-animated-bg">
@@ -1515,6 +1577,67 @@ export default function GenerateResultPage() {
                 </p>
               )}
             </>
+          )}
+
+          {/* ── Generating state - Code mode (simulated) ── */}
+          {isGenerating && viewMode === "code" && (
+            <div className="flex w-full h-full bg-[#1e1e2e] overflow-hidden rounded-2xl">
+              {/* Simulated file tree */}
+              <div className="w-60 shrink-0 border-r border-[#2a2a3e] bg-[#1b1b2f] flex flex-col">
+                <div className="p-2 border-b border-[#2a2a3e]">
+                  <div className="flex items-center gap-2 rounded-md bg-[#252540] px-2.5 py-1.5 border border-[#333355]">
+                    <svg className="h-3.5 w-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                    </svg>
+                    <span className="text-xs text-gray-600">Search files...</span>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto py-1">
+                  {SIMULATED_CODE_FILES.slice(0, simFileIndex + 1).map((f, i) => (
+                    <div
+                      key={f.path}
+                      className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer ${i === simFileIndex ? "bg-[#252540] text-white" : "text-gray-400 hover:text-gray-300"}`}
+                    >
+                      <svg className="h-3 w-3 shrink-0" style={{ color: f.name.endsWith(".tsx") ? "#3b82f6" : f.name.endsWith(".css") ? "#a855f7" : f.name.endsWith(".html") ? "#ef4444" : "#eab308" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                      </svg>
+                      <span className="truncate">{f.path}</span>
+                      {i === simFileIndex && simTypedChars < f.code.length && (
+                        <div className="ml-auto h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Simulated code content */}
+              <div className="flex flex-1 flex-col overflow-hidden">
+                {/* Tab */}
+                <div className="flex items-center border-b border-[#2a2a3e] bg-[#1b1b2f]">
+                  <div className="flex items-center gap-1.5 px-3 py-2 text-xs bg-[#1e1e2e] text-white border-r border-[#2a2a3e] border-t-2 border-t-[#2896FB]">
+                    <svg className="h-3 w-3" style={{ color: SIMULATED_CODE_FILES[simFileIndex]?.name.endsWith(".tsx") ? "#3b82f6" : SIMULATED_CODE_FILES[simFileIndex]?.name.endsWith(".css") ? "#a855f7" : SIMULATED_CODE_FILES[simFileIndex]?.name.endsWith(".html") ? "#ef4444" : "#eab308" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    </svg>
+                    <span>{SIMULATED_CODE_FILES[simFileIndex]?.name}</span>
+                  </div>
+                </div>
+                {/* File path */}
+                <div className="flex items-center px-4 py-1.5 bg-[#1e1e2e] border-b border-[#2a2a3e] shrink-0">
+                  <span className="text-xs text-gray-500">{SIMULATED_CODE_FILES[simFileIndex]?.path}</span>
+                </div>
+                {/* Code with typing effect */}
+                <div className="flex flex-1 overflow-auto">
+                  <div className="select-none py-4 pl-4 pr-2 text-right text-xs leading-5 text-gray-600 font-mono overflow-hidden shrink-0">
+                    {(SIMULATED_CODE_FILES[simFileIndex]?.code.slice(0, simTypedChars) || "").split("\n").map((_, i) => (
+                      <div key={i}>{i + 1}</div>
+                    ))}
+                  </div>
+                  <pre className="flex-1 py-4 pr-4 text-xs leading-5 font-mono overflow-auto text-gray-300" style={{ tabSize: 2, whiteSpace: "pre", wordWrap: "normal" }}>
+                    <code>{SIMULATED_CODE_FILES[simFileIndex]?.code.slice(0, simTypedChars)}</code>
+                    <span className="inline-block w-[2px] h-[14px] bg-white animate-pulse ml-[1px] align-middle" />
+                  </pre>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* ── Ready state - Code mode (view-only) ── */}

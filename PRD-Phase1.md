@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 42 user stories | 22 Built | 5 Partial | 15 Pending**
+**Total: 43 user stories | 23 Built | 5 Partial | 15 Pending**
 
 ---
 
@@ -704,6 +704,24 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 ---
 
+### US-7.8: Generation UX Overhaul `BUILT`
+**As a** user, **I want** the editor page to look functional and alive during first-time generation **so that** the experience feels polished rather than blocked.
+
+**Acceptance Criteria:**
+- [x] Top bar shows Preview (pre-selected) and Code tabs during generation — no "Generating..." or "Stop" text in top bar
+- [x] Center pill bar (device/page/refresh) visible during generation in preview mode (controls inert)
+- [x] Code tab during generation shows simulated code-writing animation: file tree populates one by one, code types out with cursor blink in dark theme
+- [x] Simulated files include realistic React project structure (index.html, App.tsx, pages, components, CSS)
+- [x] Top bar center shows "Building..." in code mode during generation
+- [x] Share and Publish buttons disabled with `opacity-50` and "Creation in Progress" tooltip during generation
+- [x] Chat input area shows normal form layout during generation: input disabled, upload disabled with "Creation in Progress" tooltip
+- [x] Send button replaced with solid black square stop icon during generation — clicking stops generation
+- [x] All simulated state resets when generation completes and real content loads
+
+**Files:** `app/generate/[id]/page.tsx`
+
+---
+
 ## Theme 8: Code View & Export
 
 ### US-8.1: Code Viewer with File Tree `BUILT`
@@ -905,12 +923,12 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 4. Prompt Box (Canvas) | 5 | 2 | 1 | 2 |
 | 5. Chat Features | 6 | 1 | 1 | 4 |
 | 6. Context Management | 1 | 0 | 0 | 1 |
-| 7. Canvas Top Bar | 7 | 4 | 1 | 2 |
+| 7. Canvas Top Bar | 8 | 5 | 1 | 2 |
 | 8. Code View & Export | 2 | 2 | 0 | 0 |
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
 | 10. Error Handling & Resilience | 1 | 1 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **42** | **22** | **5** | **15** |
+| **TOTAL** | **43** | **23** | **5** | **15** |
 
 ---
 
