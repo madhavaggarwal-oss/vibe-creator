@@ -185,10 +185,12 @@ export default function GenerateResultPage() {
   const [editModel, setEditModel] = useState<string>("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [chatCollapsed, setChatCollapsed] = useState(false);
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
   const [chatWidth, setChatWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const chatWidthRef = useRef(320);
-  const chatMinWidth = 280;
+  const chatMinWidth = typeof window !== "undefined" ? Math.round(window.innerWidth * 0.2) : 256;
   const chatMaxWidth = 500;
   const chatDefaultWidth = 320;
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -220,6 +222,17 @@ export default function GenerateResultPage() {
     } catch {}
   }, []);
 
+  // Close project menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) {
+        setShowProjectMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   // Resize drag handler — uses refs to avoid stale closures
   const isResizingRef = useRef(false);
 
@@ -227,10 +240,7 @@ export default function GenerateResultPage() {
     const onMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
       e.preventDefault();
-      const chatPanel = document.getElementById("chat-panel");
-      if (!chatPanel) return;
-      const rect = chatPanel.getBoundingClientRect();
-      const newWidth = Math.max(chatMinWidth, Math.min(chatMaxWidth, e.clientX - rect.left));
+      const newWidth = Math.max(chatMinWidth, Math.min(chatMaxWidth, e.clientX));
       setChatWidth(newWidth);
       chatWidthRef.current = newWidth;
     };
@@ -935,53 +945,56 @@ export default function GenerateResultPage() {
       {/* Top bar */}
       <header className="flex items-center bg-[#F9FAFB] shrink-0 h-14">
         {/* Left zone - Project name (above chat panel) */}
-        <div className={`flex items-center justify-between shrink-0 px-3 h-full ${chatCollapsed ? "w-12 transition-all" : ""}`} style={chatCollapsed ? undefined : { width: chatWidth }}>
-          {!chatCollapsed && (
-            <>
-              <div className="flex items-center gap-1.5 min-w-0">
-                <Link href="/" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-tr from-[#FEC403] via-[#2896FB] to-[#4BCF29]">
-                  <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12" />
-                  </svg>
-                </Link>
-                <span className="text-sm font-semibold text-gray-800 truncate">{projectName}</span>
-                <button className="shrink-0 text-gray-500 hover:text-gray-700 transition-colors">
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
-                </button>
-              </div>
-              <div className="flex items-center gap-0.5">
-                {/* Version history */}
-                <button className="rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors" title="Version history">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-                {/* Collapse chat */}
-                <button
-                  onClick={() => setChatCollapsed(true)}
-                  className="rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                  title="Collapse chat"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-                  </svg>
-                </button>
-              </div>
-            </>
-          )}
-          {chatCollapsed && (
+        <div className="flex items-center shrink-0 pl-5 pr-3 h-full gap-2" style={{ width: chatCollapsed ? undefined : chatWidth }}>
+          {/* Sparkle logo + project name — always visible */}
+          <div className="relative flex items-center gap-2 min-w-0" ref={projectMenuRef}>
             <button
-              onClick={() => setChatCollapsed(false)}
-              className="mx-auto rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-              title="Expand chat"
+              onClick={() => setShowProjectMenu((v) => !v)}
+              className="flex items-center gap-2 min-w-0 cursor-pointer"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-tr from-[#FEC403] via-[#2896FB] to-[#4BCF29]">
+                <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12" />
+                </svg>
+              </div>
+              <span className="text-sm font-semibold text-gray-800 truncate">{projectName}</span>
+              <svg className={`h-3.5 w-3.5 shrink-0 text-gray-500 transition-transform ${showProjectMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
               </svg>
             </button>
-          )}
+            {showProjectMenu && (
+              <div className="absolute top-full left-0 mt-1.5 w-52 rounded-xl border border-gray-200 bg-white shadow-lg py-1.5 z-50">
+                <Link
+                  href="/"
+                  className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  onClick={() => setShowProjectMenu(false)}
+                >
+                  <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                  Go to Dashboard
+                </Link>
+              </div>
+            )}
+          </div>
+          {/* Version history + Collapse/Expand — always visible */}
+          <div className="flex items-center gap-0.5 ml-auto shrink-0">
+            <button className="rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors" title="Version history">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setChatCollapsed((v) => !v)}
+              className="rounded-md p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              title={chatCollapsed ? "Expand chat" : "Collapse chat"}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <rect x="3" y="3" width="18" height="18" rx="3" />
+                <line x1="10" y1="3" x2="10" y2="21" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Right zone - Preview controls & actions */}
@@ -1149,9 +1162,10 @@ export default function GenerateResultPage() {
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Chat panel (left) */}
-        <div id="chat-panel" className={`flex shrink-0 flex-col bg-[#F9FAFB] ${chatCollapsed ? "w-0 overflow-hidden transition-all duration-200" : ""}`} style={chatCollapsed ? undefined : { width: chatWidth }}>
+        <div id="chat-panel" className={`shrink-0 bg-[#F9FAFB] overflow-hidden ${isResizing ? "" : "transition-all duration-150 ease-in-out"}`} style={{ width: chatCollapsed ? 0 : chatWidth }}>
+          <div className="flex flex-col h-full" style={{ width: chatWidth }}>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 overflow-y-auto pl-5 pr-3 py-4 space-y-3 scrollbar-thin">
             {/* Show prompt for generating/aborted state */}
             {(isGenerating || isAborted) && pendingPrompt && (
               <>
@@ -1166,7 +1180,7 @@ export default function GenerateResultPage() {
                   </div>
                 )}
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-blue-600 px-3.5 py-2.5 shadow-sm">
+                  <div className="max-w-[85%] rounded-2xl bg-blue-600 px-3.5 py-2.5 shadow-sm">
                     <p className="text-sm text-white">{pendingPrompt}</p>
                   </div>
                 </div>
@@ -1205,19 +1219,22 @@ export default function GenerateResultPage() {
                   </div>
                 )}
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-blue-600 px-3.5 py-2.5 shadow-sm">
-                    <p className="text-sm text-white">{funnel.prompt}</p>
+                  <div className="max-w-[85%] rounded-2xl bg-white border border-gray-200 px-3.5 py-2.5 shadow-sm">
+                    <p className="text-[14.5px] font-sans text-gray-700">{funnel.prompt}</p>
                   </div>
                 </div>
-                <div className="flex justify-start">
-                  <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-white border border-gray-200 px-3.5 py-2.5 shadow-sm">
-                    <p className="text-sm text-gray-700">
-                      I&apos;ve created your project with {fileCount} files. You can ask me to make changes — edit components, add pages, change the theme, or modify functionality.
-                    </p>
-                  </div>
+                <div className="py-1.5">
+                  <p className="text-[14.5px] font-sans text-gray-700">
+                    I&apos;ve created your project with {fileCount} files. You can ask me to make changes — edit components, add pages, change the theme, or modify functionality.
+                  </p>
                 </div>
                 {chatMessages.map((msg, idx) => (
                   <div key={idx}>
+                    {msg.role === "user" && msg.timestamp && (
+                      <p className="text-center text-[12.5px] text-gray-400 font-sans mt-3 mb-1.5">
+                        {new Date(msg.timestamp).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} at {new Date(msg.timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    )}
                     {msg.images && msg.images.length > 0 && (
                       <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-1`}>
                         <div className="max-w-[85%]">
@@ -1228,16 +1245,22 @@ export default function GenerateResultPage() {
                         </div>
                       </div>
                     )}
-                    <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-sm ${msg.role === "user" ? "rounded-br-sm bg-blue-600" : "rounded-bl-sm bg-white border border-gray-200"}`}>
-                        <p className={`text-sm ${msg.role === "user" ? "text-white" : "text-gray-700"}`}>{msg.content}</p>
+                    {msg.role === "user" ? (
+                      <div className="flex justify-end">
+                        <div className="max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-sm bg-white border border-gray-200">
+                          <p className="text-[14.5px] font-sans text-gray-700">{msg.content}</p>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="py-1.5">
+                        <p className="text-[14.5px] font-sans text-gray-700">{msg.content}</p>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {isSending && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-white border border-gray-200 px-4 py-3 shadow-sm">
+                  <div className="py-1.5">
+                    <div>
                       <div className="flex items-center gap-1.5">
                         <div className="h-2 w-2 animate-bounce rounded-full bg-blue-400 [animation-delay:0ms]" />
                         <div className="h-2 w-2 animate-bounce rounded-full bg-[#2896FB] [animation-delay:150ms]" />
@@ -1252,7 +1275,7 @@ export default function GenerateResultPage() {
           </div>
 
           {/* Chat input */}
-          <div className="bg-[#F9FAFB] p-3">
+          <div className="bg-[#F9FAFB] pl-5 pr-3 py-3">
             {isGenerating ? (
               <button
                 type="button"
@@ -1346,6 +1369,7 @@ export default function GenerateResultPage() {
                 </form>
               </div>
             )}
+          </div>
           </div>
         </div>
 
