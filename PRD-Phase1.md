@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 41 user stories | 21 Built | 5 Partial | 15 Pending**
+**Total: 42 user stories | 22 Built | 5 Partial | 15 Pending**
 
 ---
 
@@ -306,8 +306,8 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 **Acceptance Criteria:**
 - [x] Chat input at bottom of left panel with text field and send button
-- [x] User messages shown right-aligned in blue bubbles
-- [x] AI responses shown left-aligned in white bubbles with gray border
+- [x] User messages shown right-aligned in white bubbles with gray border
+- [x] AI responses shown left-aligned as plain text (no bubble, full width)
 - [x] Bouncing dots loading indicator while AI processes
 - [x] "Stop generating" button to cancel ongoing operation
 - [x] Changes applied to project files and preview auto-refreshes
@@ -683,6 +683,27 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 ---
 
+### US-7.7: Chat Area & Top Bar Refinements `BUILT`
+**As a** user, **I want** the chat area and top bar to feel clean and modern with clear visual hierarchy **so that** conversations are easy to read and navigation is intuitive.
+
+**Acceptance Criteria:**
+- [x] User prompt bubbles use white background with gray border (not blue) and uniform `rounded-2xl` on all corners
+- [x] Date and time shown above each user prompt (e.g. "18 Feb at 19:55")
+- [x] LLM responses rendered as plain text at full chat width (no bubble/background)
+- [x] Chat text uses `font-sans` at `14.5px`, timestamps at `12.5px`
+- [x] Sparkle gradient logo (rounded-lg) replaces left-arrow icon beside project name
+- [x] Clicking logo/project name opens dropdown with "Go to Dashboard" → navigates to `/`
+- [x] Chevron rotates when dropdown is open; click-outside closes it
+- [x] Sidebar panel icon for chat collapse/expand toggle
+- [x] Smooth curtain-style collapse/expand animation — text stays fixed, container clips over it
+- [x] Project name, version history, and collapse/expand icons always visible (even when collapsed)
+- [x] Consistent `pl-5 pr-3` padding across chat area, top bar, and chat input
+- [x] Minimum chat panel width set to 20% of viewport width
+
+**Files:** `app/generate/[id]/page.tsx`
+
+---
+
 ## Theme 8: Code View & Export
 
 ### US-8.1: Code Viewer with File Tree `BUILT`
@@ -884,12 +905,12 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 4. Prompt Box (Canvas) | 5 | 2 | 1 | 2 |
 | 5. Chat Features | 6 | 1 | 1 | 4 |
 | 6. Context Management | 1 | 0 | 0 | 1 |
-| 7. Canvas Top Bar | 6 | 3 | 1 | 2 |
+| 7. Canvas Top Bar | 7 | 4 | 1 | 2 |
 | 8. Code View & Export | 2 | 2 | 0 | 0 |
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
 | 10. Error Handling & Resilience | 1 | 1 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **41** | **21** | **5** | **15** |
+| **TOTAL** | **42** | **22** | **5** | **15** |
 
 ---
 
