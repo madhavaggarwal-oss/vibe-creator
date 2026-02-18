@@ -24,6 +24,7 @@ export interface Funnel {
   pages: FunnelPage[];
   files?: Record<string, string>;
   chatHistory: ChatMessage[];
+  preGenHistory?: ChatMessage[];
   createdAt: string;
 }
 

@@ -42,13 +42,24 @@ export async function POST(request: NextRequest) {
     const trimmedMessage = message.trim();
 
     const imageList = Array.isArray(images) ? images.filter((i: unknown) => typeof i === "string") : [];
+
+    // Pass abort signal so the Gemini call is cancelled when the client disconnects
     const result = await editFunnel(
       funnel.files!,
       trimmedMessage,
       funnel.chatHistory,
       modelId,
-      imageList.length > 0 ? imageList : undefined
+      imageList.length > 0 ? imageList : undefined,
+      request.signal
     );
+
+    // If client disconnected during generation, don't save changes
+    if (request.signal.aborted) {
+      return NextResponse.json(
+        { error: "Edit cancelled" },
+        { status: 499 }
+      );
+    }
 
     // Merge partial file updates into existing files
     const updatedFiles = { ...funnel.files! };
@@ -64,9 +75,26 @@ export async function POST(request: NextRequest) {
     const hasMarkers = Object.values(updatedFiles).some(
       (v) => typeof v === "string" && /__IMG/.test(v)
     );
+
+    // Check again before expensive image processing
+    if (request.signal.aborted) {
+      return NextResponse.json(
+        { error: "Edit cancelled" },
+        { status: 499 }
+      );
+    }
+
     const finalFiles = hasMarkers
       ? await processImageMarkers(updatedFiles)
       : updatedFiles;
+
+    // Final check before saving
+    if (request.signal.aborted) {
+      return NextResponse.json(
+        { error: "Edit cancelled" },
+        { status: 499 }
+      );
+    }
 
     // Update chat history
     const chatHistory = [...funnel.chatHistory];
@@ -101,6 +129,14 @@ export async function POST(request: NextRequest) {
       changedFiles: Object.keys(result.files),
     });
   } catch (error: unknown) {
+    // If the client disconnected (abort), return silently
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return NextResponse.json(
+        { error: "Edit cancelled" },
+        { status: 499 }
+      );
+    }
+
     console.error("Chat edit error:", error);
     const errMsg =
       error instanceof Error ? error.message : "Failed to process edit";

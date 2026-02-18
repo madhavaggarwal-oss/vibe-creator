@@ -19,12 +19,26 @@ export async function POST(request: NextRequest) {
     const id = uuidv4();
 
     const imageList = Array.isArray(images) ? images.filter((i: unknown) => typeof i === "string") : [];
+
+    // Pass the request abort signal directly to generateFunnel so the Gemini API
+    // call is actually cancelled when the client disconnects (not just ignored).
+    // This prevents a zombie first-generation from consuming API quota when the
+    // user aborts and retries with a new prompt.
     const files = await generateFunnel(
       prompt.trim(),
       modelId,
       imageList.length > 0 ? imageList : undefined,
-      scrapeData || undefined
+      scrapeData || undefined,
+      request.signal
     );
+
+    // Double-check: if client disconnected while Gemini was finishing, don't save
+    if (request.signal.aborted) {
+      return NextResponse.json(
+        { error: "Generation cancelled" },
+        { status: 499 }
+      );
+    }
 
     const name = extractProjectName(files) || prompt.trim().slice(0, 60);
 
@@ -48,6 +62,14 @@ export async function POST(request: NextRequest) {
       fileCount: Object.keys(files).length,
     });
   } catch (error: unknown) {
+    // If the client disconnected (abort), return silently
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return NextResponse.json(
+        { error: "Generation cancelled" },
+        { status: 499 }
+      );
+    }
+
     console.error("Generation error:", error);
     const message =
       error instanceof Error ? error.message : "Failed to generate funnel";

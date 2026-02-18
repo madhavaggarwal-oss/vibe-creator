@@ -55,6 +55,7 @@ interface FunnelData {
   model: string;
   files?: Record<string, string>;
   chatHistory: ChatMessage[];
+  preGenHistory?: ChatMessage[];
   createdAt: string;
 }
 
@@ -94,6 +95,14 @@ const SIMULATED_CODE_FILES = [
   { path: "/src/components/Header.tsx", name: "Header.tsx", code: `import React, { useState } from "react";\nimport { Link } from "react-router-dom";\n\nexport default function Header() {\n  const [isOpen, setIsOpen] = useState(false);\n\n  return (\n    <header className="bg-white shadow-sm\n      sticky top-0 z-50">\n      <nav className="max-w-6xl mx-auto\n        px-6 py-4 flex items-center\n        justify-between">\n        <Link to="/" className="text-xl\n          font-bold text-gray-900">\n          Brand\n        </Link>\n        <div className="hidden md:flex\n          items-center gap-6">\n          <Link to="/" className="text-gray-600\n            hover:text-gray-900">Home</Link>\n          <Link to="/about" className="text-gray-600\n            hover:text-gray-900">About</Link>\n        </div>\n      </nav>\n    </header>\n  );\n}` },
   { path: "/src/components/Hero.tsx", name: "Hero.tsx", code: `import React from "react";\n\nexport default function Hero() {\n  return (\n    <section className="gradient-bg\n      text-white py-24 px-6">\n      <div className="max-w-4xl mx-auto\n        text-center">\n        <h1 className="text-5xl font-bold\n          mb-6 leading-tight">\n          Welcome to Your\n          New Website\n        </h1>\n        <p className="text-xl opacity-90\n          mb-8 max-w-2xl mx-auto">\n          Built with React and\n          Tailwind CSS\n        </p>\n        <button className="bg-white\n          text-blue-600 px-8 py-3\n          rounded-full font-semibold\n          hover:shadow-lg transition">\n          Get Started\n        </button>\n      </div>\n    </section>\n  );\n}` },
   { path: "/src/components/Footer.tsx", name: "Footer.tsx", code: `import React from "react";\n\nexport default function Footer() {\n  return (\n    <footer className="bg-gray-900\n      text-gray-400 py-12 px-6">\n      <div className="max-w-6xl mx-auto\n        flex flex-col md:flex-row\n        justify-between items-center\n        gap-4">\n        <p className="text-sm">\n          &copy; {new Date().getFullYear()}\n          All rights reserved.\n        </p>\n        <div className="flex gap-6\n          text-sm">\n          <a href="#" className="hover:text-white\n            transition">Privacy</a>\n          <a href="#" className="hover:text-white\n            transition">Terms</a>\n        </div>\n      </div>\n    </footer>\n  );\n}` },
+];
+
+const WAITING_MESSAGES = [
+  "Waiting for new requirements",
+  "Ready when you are",
+  "Describe what you'd like to build",
+  "Type a prompt to get started",
+  "Standing by for your next idea",
 ];
 
 type GeneratingState = "idle" | "generating" | "aborted" | "error";
@@ -184,12 +193,16 @@ export default function GenerateResultPage() {
   const [generationStep, setGenerationStep] = useState(0);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [pendingPrompt, setPendingPrompt] = useState<string>("");
+  const [pendingTimestamp, setPendingTimestamp] = useState<string>("");
   const [pendingModel, setPendingModel] = useState<string>("");
   const generateAbortRef = useRef<AbortController | null>(null);
   const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Chat state
+  const [preGenMessages, setPreGenMessages] = useState<ChatMessage[]>([]); // messages from aborted generations (shown before current prompt)
+  const preGenMessagesRef = useRef<ChatMessage[]>([]);
+  preGenMessagesRef.current = preGenMessages;
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -206,6 +219,9 @@ export default function GenerateResultPage() {
   const chatDefaultWidth = 320;
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Waiting message rotation for aborted state
+  const [waitingMsgIndex, setWaitingMsgIndex] = useState(0);
 
   // Simulated code animation state
   const [simFileIndex, setSimFileIndex] = useState(0);
@@ -266,6 +282,19 @@ export default function GenerateResultPage() {
       setSimTypedChars(0);
     }
   }, [isSimGenerating]);
+
+  // Rotate waiting messages when aborted
+  const isAbortedForWaiting = generatingState === "aborted";
+  useEffect(() => {
+    if (!isAbortedForWaiting) {
+      setWaitingMsgIndex(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setWaitingMsgIndex((i) => (i + 1) % WAITING_MESSAGES.length);
+    }, 4500);
+    return () => clearInterval(timer);
+  }, [isAbortedForWaiting]);
 
   // Close project menu on click outside
   useEffect(() => {
@@ -412,6 +441,15 @@ export default function GenerateResultPage() {
         setGeneratingState("idle");
         setLoading(false);
 
+        // Persist pre-generation messages (cancelled exchanges) to the funnel
+        if (preGenMessagesRef.current.length > 0) {
+          fetch(`/api/funnel/${data.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ preGenHistory: preGenMessagesRef.current }),
+          }).catch(() => { /* silent — best effort persistence */ });
+        }
+
         // Capture snapshot after Sandpack renders
         captureSnapshot(data.id);
       } catch (err: unknown) {
@@ -441,6 +479,7 @@ export default function GenerateResultPage() {
         sessionStorage.removeItem("vibe-pending-generation");
         const { prompt, model, images, scrapeData, scrapeUrl } = JSON.parse(stored);
         setPendingPrompt(prompt);
+        setPendingTimestamp(new Date().toISOString());
         setPendingModel(model);
         if (Array.isArray(images) && images.length > 0) {
           setPendingPromptImages(images);
@@ -541,6 +580,9 @@ export default function GenerateResultPage() {
         const data = await res.json();
         setFunnel(data);
         setChatMessages(data.chatHistory || []);
+        if (data.preGenHistory && data.preGenHistory.length > 0) {
+          setPreGenMessages(data.preGenHistory);
+        }
         setEditModel(data.model);
 
         // Capture snapshot for existing projects (populates cache over time)
@@ -710,6 +752,15 @@ export default function GenerateResultPage() {
           timestamp: new Date().toISOString(),
         };
         setChatMessages((prev) => [...prev, stopMsg]);
+
+        // Persist the user prompt + stopped message to server so they survive refresh
+        if (funnel) {
+          fetch(`/api/funnel/${funnel.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ appendChatHistory: [userMsg, stopMsg] }),
+          }).catch(() => { /* best effort */ });
+        }
       } else {
         const errMsg =
           err instanceof Error ? err.message : "Something went wrong";
@@ -1174,9 +1225,9 @@ export default function GenerateResultPage() {
             ) : (
               <>
                 <button
-                  disabled={isGenerating}
-                  title={isGenerating ? "Creation in Progress" : undefined}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 h-8 text-sm font-medium text-gray-700 transition-colors ${isGenerating ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-50"}`}
+                  disabled={isGenerating || isAborted}
+                  title={isGenerating || isAborted ? "Creation in Progress" : undefined}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 h-8 text-sm font-medium text-gray-700 transition-colors ${isGenerating || isAborted ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-50"}`}
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
@@ -1184,9 +1235,9 @@ export default function GenerateResultPage() {
                   Share
                 </button>
                 <button
-                  disabled={isGenerating}
-                  title={isGenerating ? "Creation in Progress" : undefined}
-                  className={`inline-flex items-center rounded-lg bg-blue-600 px-5 h-8 text-sm font-semibold text-white shadow-sm transition-all ${isGenerating ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-700"}`}
+                  disabled={isGenerating || isAborted}
+                  title={isGenerating || isAborted ? "Creation in Progress" : undefined}
+                  className={`inline-flex items-center rounded-lg bg-blue-600 px-5 h-8 text-sm font-semibold text-white shadow-sm transition-all ${isGenerating || isAborted ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-700"}`}
                 >
                   Publish
                 </button>
@@ -1203,9 +1254,36 @@ export default function GenerateResultPage() {
           <div className="flex flex-col h-full" style={{ width: chatWidth }}>
 
           <div className="flex-1 overflow-y-auto pl-6 pr-3 py-4 space-y-3 scrollbar-thin">
+            {/* Pre-generation messages (from aborted attempts in this session) */}
+            {preGenMessages.map((msg, idx) => (
+              <div key={`pre-${idx}`}>
+                {msg.role === "user" && msg.timestamp && (
+                  <p className="text-center text-[12.5px] text-gray-400 font-sans mt-3 mb-1.5">
+                    {new Date(msg.timestamp).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} at {new Date(msg.timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
+                {msg.role === "user" ? (
+                  <div className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-sm bg-white border border-gray-200">
+                      <p className="text-[14.5px] font-sans text-gray-700">{msg.content}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-1.5">
+                    <p className="text-[14.5px] font-sans text-gray-700">{msg.content}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+
             {/* Show prompt for generating/aborted state */}
             {(isGenerating || isAborted) && pendingPrompt && (
               <>
+                {pendingTimestamp && (
+                  <p className="text-center text-[12.5px] text-gray-400 font-sans mt-3 mb-1.5">
+                    {new Date(pendingTimestamp).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} at {new Date(pendingTimestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
                 {pendingPromptImages.length > 0 && (
                   <div className="flex justify-end">
                     <div className="max-w-[85%]">
@@ -1217,8 +1295,8 @@ export default function GenerateResultPage() {
                   </div>
                 )}
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl bg-blue-600 px-3.5 py-2.5 shadow-sm">
-                    <p className="text-sm text-white">{pendingPrompt}</p>
+                  <div className="max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-sm bg-white border border-gray-200">
+                    <p className="text-[14.5px] font-sans text-gray-700">{pendingPrompt}</p>
                   </div>
                 </div>
                 {isGenerating && (
@@ -1233,10 +1311,8 @@ export default function GenerateResultPage() {
                   </div>
                 )}
                 {isAborted && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-white border border-amber-200 px-3.5 py-2.5 shadow-sm">
-                      <p className="text-sm text-amber-700">Generation was cancelled. You can retry or go back.</p>
-                    </div>
+                  <div className="py-1.5">
+                    <p className="text-[14.5px] font-sans text-gray-700">This message was cancelled.</p>
                   </div>
                 )}
               </>
@@ -1245,6 +1321,12 @@ export default function GenerateResultPage() {
             {/* Show full chat for ready state */}
             {isReady && funnel && (
               <>
+                {/* Pre-generation messages are already rendered above */}
+                {funnel.createdAt && (
+                  <p className="text-center text-[12.5px] text-gray-400 font-sans mt-3 mb-1.5">
+                    {new Date(funnel.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} at {new Date(funnel.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
                 {funnel.promptImages && funnel.promptImages.length > 0 && (
                   <div className="flex justify-end">
                     <div className="max-w-[85%]">
@@ -1350,34 +1432,96 @@ export default function GenerateResultPage() {
                 </button>
               </form>
             ) : isAborted ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleRetryGeneration}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-700"
+              <div className="space-y-2">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (chatInput.trim()) {
+                      // Save the cancelled exchange to pre-generation messages
+                      if (pendingPrompt) {
+                        setPreGenMessages((prev) => [
+                          ...prev,
+                          { role: "user" as const, content: pendingPrompt, timestamp: pendingTimestamp || new Date().toISOString() },
+                          { role: "assistant" as const, content: "This message was cancelled.", timestamp: new Date().toISOString() },
+                        ]);
+                      }
+                      setPendingPrompt(chatInput.trim());
+                      setPendingTimestamp(new Date().toISOString());
+                      startGeneration(chatInput.trim(), pendingModel);
+                      setChatInput("");
+                    } else {
+                      handleRetryGeneration();
+                    }
+                  }}
+                  className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400/30 transition-all"
                 >
-                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
-                  </svg>
-                  Retry
-                </button>
-                <Link
-                  href="/"
-                  className="flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all"
-                >
-                  Back
-                </Link>
+                  <input
+                    ref={chatFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      handleChatImageSelect(e.target.files);
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => chatFileInputRef.current?.click()}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                  </button>
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Describe what you want to build..."
+                    className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!chatInput.trim()}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </form>
               </div>
             ) : isSending ? (
-              <button
-                type="button"
-                onClick={handleStop}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-600 transition-all hover:bg-red-100 hover:border-red-300"
-              >
-                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-                Stop generating
-              </button>
+              <form className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 transition-all" onSubmit={(e) => e.preventDefault()}>
+                <button
+                  type="button"
+                  disabled
+                  title="Generation in progress"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-50 cursor-not-allowed"
+                >
+                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                </button>
+                <input
+                  type="text"
+                  disabled
+                  placeholder="Describe changes you want..."
+                  className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none cursor-not-allowed"
+                />
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white transition-all hover:bg-black"
+                  title="Stop generation"
+                >
+                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="4" y="4" width="16" height="16" rx="2" />
+                  </svg>
+                </button>
+              </form>
             ) : (
               <div className="space-y-2">
                 {chatPendingImages.length > 0 && (
@@ -1521,38 +1665,25 @@ export default function GenerateResultPage() {
             </div>
           )}
 
-          {/* ── Aborted state in canvas ── */}
+          {/* ── Aborted state in canvas — waiting for new prompt ── */}
           {isAborted && (
             <div className="relative w-full h-full rounded-2xl border border-gray-200 bg-white shadow-lg overflow-hidden flex items-center justify-center">
-              <div className="flex flex-col items-center gap-5 text-center px-6">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50">
-                  <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="#F59E0B" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0-10.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+              <div className="absolute inset-0 vibe-animated-bg">
+                <div className="absolute inset-0 vibe-gradient-sweep" />
+                <div className="absolute w-[500px] h-[500px] rounded-full opacity-20 blur-[100px] vibe-blob-1" />
+                <div className="absolute w-[400px] h-[400px] rounded-full opacity-15 blur-[80px] vibe-blob-2" />
+                <div className="absolute w-[350px] h-[350px] rounded-full opacity-10 blur-[70px] vibe-blob-3" />
+              </div>
+              <div className="relative flex flex-col items-center gap-4 text-center px-6">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FEC403] via-[#2896FB] to-[#4BCF29]">
+                  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12" />
                   </svg>
                 </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-800">Generation cancelled</h2>
-                  <p className="mt-1 text-sm text-gray-500 max-w-sm">
-                    The site generation was stopped. You can try again with the same prompt or go back to start fresh.
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={handleRetryGeneration}
-                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 transition-all"
-                  >
-                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
-                    </svg>
-                    Try again
-                  </button>
-                  <Link
-                    href="/"
-                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all"
-                  >
-                    Go back
-                  </Link>
-                </div>
+                <p className="text-base font-medium text-gray-700 transition-all duration-500">
+                  {WAITING_MESSAGES[waitingMsgIndex]}
+                </p>
+                <p className="text-sm text-gray-400">Enter a prompt in the chat to start building</p>
               </div>
             </div>
           )}

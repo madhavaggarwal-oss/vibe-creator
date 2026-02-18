@@ -660,7 +660,7 @@ function repairBraces(files: Record<string, string>): Record<string, string> {
       continue;
     }
 
-    // Count braces outside of strings, template literals, and comments
+    // Count braces outside of strings, template literals, and comments.
     let braceDepth = 0;
     let inString: string | null = null; // tracks quote char: ' " `
     let inLineComment = false;
@@ -718,16 +718,47 @@ function repairBraces(files: Record<string, string>): Record<string, string> {
       if (ch === "}") braceDepth--;
     }
 
-    // Conservative: only add exactly 1 missing brace (the common truncation case)
+    // If a string/comment was never closed, the brace count is unreliable.
+    // Don't attempt any repairs — it would likely make things worse.
+    if (inString || inLineComment || inBlockComment) {
+      console.warn(`[repairBraces] ${path}: unclosed ${inString ? "string (" + inString + ")" : "comment"} — skipping repair (count unreliable)`);
+      result[path] = content;
+      continue;
+    }
+
+    let fixed = content;
+
     if (braceDepth === 1) {
+      // Missing one closing brace (common truncation case) — add it
       console.warn(`[repairBraces] ${path}: added 1 missing closing brace`);
-      result[path] = content + "\n}\n";
+      fixed = content + "\n}\n";
     } else if (braceDepth > 1) {
       console.warn(`[repairBraces] ${path}: detected ${braceDepth} unbalanced braces — skipping repair (too risky)`);
-      result[path] = content;
-    } else {
-      result[path] = content;
+      fixed = content;
+    } else if (braceDepth === -1) {
+      // One extra closing brace (common Gemini issue) — remove the last trailing `}`
+      const lastBrace = content.lastIndexOf("}");
+      if (lastBrace !== -1) {
+        console.warn(`[repairBraces] ${path}: removed 1 extra trailing closing brace`);
+        fixed = content.slice(0, lastBrace) + content.slice(lastBrace + 1);
+      }
     }
+
+    // Only strip clearly invalid trailing single characters (stray quotes from JSON parsing)
+    // Don't strip anything that could be valid code (like ];, etc.)
+    const trimmed = fixed.trimEnd();
+    const lastChar = trimmed[trimmed.length - 1];
+    if (lastChar === "'" || lastChar === '"' || lastChar === ",") {
+      // Check if this is a stray character on its own line (not part of code)
+      const lastNewline = trimmed.lastIndexOf("\n");
+      const lastLine = trimmed.slice(lastNewline + 1).trim();
+      if (lastLine.length === 1) {
+        console.warn(`[repairBraces] ${path}: stripped stray trailing '${lastChar}'`);
+        fixed = trimmed.slice(0, -1) + "\n";
+      }
+    }
+
+    result[path] = fixed;
   }
 
   return result;
@@ -779,7 +810,8 @@ export async function editFunnel(
   instruction: string,
   chatHistory: { role: string; content: string }[],
   modelId: string,
-  images?: string[]
+  images?: string[],
+  signal?: AbortSignal
 ): Promise<{
   message: string;
   files: Record<string, string | null>;
@@ -820,7 +852,7 @@ export async function editFunnel(
     contentParts.push(...imagesToParts(images));
   }
 
-  const result = await model.generateContent(contentParts);
+  const result = await model.generateContent(contentParts, signal ? { signal } : undefined);
 
   const response = result.response;
   const text = response.text();
@@ -852,7 +884,8 @@ export async function generateFunnel(
   prompt: string,
   modelId: string,
   images?: string[],
-  scrapeData?: ScrapeDataForGeneration
+  scrapeData?: ScrapeDataForGeneration,
+  signal?: AbortSignal
 ): Promise<Record<string, string>> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -906,7 +939,8 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
     contentParts.push(...imagesToParts(images));
   }
 
-  const result = await model.generateContent(contentParts);
+  // Pass abort signal to the Gemini API so the request is cancelled if the client disconnects
+  const result = await model.generateContent(contentParts, signal ? { signal } : undefined);
 
   const response = result.response;
   const finishReason = response.candidates?.[0]?.finishReason;
@@ -938,8 +972,14 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
     }
   }
 
+  // Check if cancelled before expensive image processing
+  if (signal?.aborted) {
+    throw new DOMException("Generation cancelled", "AbortError");
+  }
+
   // Process image markers: generate AI images and replace markers with URLs
   const filesWithImages = await processImageMarkers(files);
 
-  return filesWithImages;
+  // Repair common brace issues (Gemini sometimes adds extra trailing braces)
+  return repairBraces(filesWithImages);
 }

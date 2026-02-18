@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFunnel, isReactProject } from "@/lib/storage";
+import { getFunnel, saveFunnel, isReactProject } from "@/lib/storage";
 import fs from "fs/promises";
 import path from "path";
 
@@ -23,6 +23,7 @@ export async function GET(
       model: funnel.model,
       files: funnel.files,
       chatHistory: funnel.chatHistory || [],
+      preGenHistory: funnel.preGenHistory || [],
       createdAt: funnel.createdAt,
     });
   }
@@ -39,6 +40,32 @@ export async function GET(
     chatHistory: funnel.chatHistory || [],
     createdAt: funnel.createdAt,
   });
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const funnel = await getFunnel(id);
+
+  if (!funnel) {
+    return NextResponse.json({ error: "Funnel not found" }, { status: 404 });
+  }
+
+  const body = await request.json();
+
+  if (body.preGenHistory) {
+    funnel.preGenHistory = body.preGenHistory;
+  }
+
+  // Append chat messages (used when edits are stopped — persist user prompt + stopped message)
+  if (Array.isArray(body.appendChatHistory)) {
+    funnel.chatHistory = [...funnel.chatHistory, ...body.appendChatHistory];
+  }
+
+  await saveFunnel(funnel);
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(

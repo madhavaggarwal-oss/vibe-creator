@@ -5,12 +5,69 @@ import {
   SandpackLayout,
   SandpackPreview,
 } from "@codesandbox/sandpack-react";
-import { useMemo } from "react";
+import { useMemo, Component, type ReactNode } from "react";
 
 interface ReactProjectPreviewProps {
   files: Record<string, string>;
   refreshKey?: number;
   startRoute?: string;
+}
+
+// ── Error boundary to catch Sandpack crashes gracefully ──
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  refreshKey?: number;
+}
+interface ErrorBoundaryState {
+  hasError: boolean;
+  errorMessage: string;
+}
+
+class SandpackErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, errorMessage: "" };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    // Extract a readable message from the error
+    let msg = error.message || "Unknown error";
+    // The "Cannot assign to read only property" wraps the actual syntax error — extract it
+    const syntaxMatch = msg.match(/SyntaxError:\s*(.+)/);
+    if (syntaxMatch) {
+      msg = syntaxMatch[1];
+    }
+    return { hasError: true, errorMessage: msg };
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    // Reset error state when refreshKey changes (user clicked refresh or files changed)
+    if (prevProps.refreshKey !== this.props.refreshKey) {
+      this.setState({ hasError: false, errorMessage: "" });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-full w-full items-center justify-center bg-white p-8">
+          <div className="flex flex-col items-center gap-4 text-center max-w-md">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50">
+              <svg className="h-6 w-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-800">Preview compilation error</h3>
+              <p className="mt-1 text-xs text-gray-500 leading-relaxed">{this.state.errorMessage}</p>
+            </div>
+            <p className="text-xs text-gray-400">Try asking the AI to fix this error, or edit the code directly.</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // Extract Google Font URLs from index.html <link> tags
@@ -137,7 +194,7 @@ export default function ReactProjectPreview({
   }, [files, startRoute]);
 
   return (
-    <>
+    <SandpackErrorBoundary refreshKey={refreshKey}>
       {/* Force Sandpack internal wrappers to fill parent height */}
       <style>{`
         .sp-wrapper { height: 100% !important; }
@@ -173,6 +230,6 @@ export default function ReactProjectPreview({
           />
         </SandpackLayout>
       </SandpackProvider>
-    </>
+    </SandpackErrorBoundary>
   );
 }

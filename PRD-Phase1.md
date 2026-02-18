@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 43 user stories | 23 Built | 5 Partial | 15 Pending**
+**Total: 46 user stories | 26 Built | 5 Partial | 15 Pending**
 
 ---
 
@@ -309,7 +309,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - [x] User messages shown right-aligned in white bubbles with gray border
 - [x] AI responses shown left-aligned as plain text (no bubble, full width)
 - [x] Bouncing dots loading indicator while AI processes
-- [x] "Stop generating" button to cancel ongoing operation
+- [x] Square stop icon button (same style as initial generation) to cancel ongoing edit — no full-width "Stop generating" text button
 - [x] Changes applied to project files and preview auto-refreshes
 - [x] Chat history persisted across page reloads (stored in project JSON)
 - [x] Last 10 chat messages sent to AI for context continuity
@@ -791,7 +791,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - [x] "Stop" / "Stop generating" button to cancel generation (in top bar and chat panel)
 - [x] Aborted state: "Generation cancelled" message with "Try again" and "Go back" options
 - [x] Error state: "Generation failed" message with error details and retry button
-- [x] In chat panel: user's prompt shown as blue bubble, bouncing dots for AI thinking
+- [x] In chat panel: user's prompt shown as white bubble with gray border (consistent with all other user messages), bouncing dots for AI thinking
 
 **Files:** `app/generate/[id]/page.tsx` (GENERATION_STEPS, generating overlay section ~lines 1252-1355)
 
@@ -862,6 +862,56 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 ---
 
+### US-10.2: Server-Side Abort Propagation `BUILT`
+**As a** user, **I want** stopping generation to truly cancel the LLM call on the server **so that** no changes are saved and API resources are freed when I click stop.
+
+**Acceptance Criteria:**
+- [x] Initial generation: abort signal passed from `request.signal` through `generateFunnel` to `model.generateContent()` — Gemini API call actually cancelled at network level
+- [x] Chat edit: abort signal passed from `request.signal` through `editFunnel` to `model.generateContent()` — Gemini API call actually cancelled
+- [x] Chat edit stopped: no file changes saved to disk (server checks `request.signal.aborted` before saving)
+- [x] Chat edit stopped: server returns 499 status, caught as AbortError on client
+- [x] Initial generation aborted: server does not save funnel, project does not appear in listing
+- [x] Abort signal checked before expensive image processing (`processImageMarkers`) to avoid wasted work
+- [x] No zombie background LLM calls — previous approach using `Promise.race` replaced with direct signal propagation
+
+**Files:** `app/api/generate/route.ts`, `app/api/chat/route.ts`, `lib/gemini.ts`
+
+---
+
+### US-10.3: Chat History Persistence on Abort/Stop `BUILT`
+**As a** user, **I want** my chat messages to persist even when generation is aborted or stopped **so that** conversation history survives page refreshes.
+
+**Acceptance Criteria:**
+- [x] Aborted initial generation: user prompt + "This message was cancelled." saved as `preGenHistory` on the funnel via PATCH API
+- [x] `preGenHistory` field added to Funnel model in storage
+- [x] `preGenHistory` returned in GET `/api/funnel/{id}` response
+- [x] On page load, `preGenHistory` populated into `preGenMessages` state — messages visible immediately
+- [x] Pre-generation messages rendered unconditionally at top of chat scroll area (visible in all states: generating, aborted, ready)
+- [x] Stopped chat edit: user prompt + "Generation stopped. No changes were made." appended to server's `chatHistory` via PATCH (without saving file changes)
+- [x] PATCH `/api/funnel/{id}` supports `appendChatHistory` to add messages without overwriting
+- [x] Timestamps preserved correctly: user message uses original submission time, cancelled/stopped message uses current time
+- [x] Date and time displayed above every user prompt in all rendering paths (preGenMessages, generating/aborted state, ready state initial prompt, chatMessages)
+
+**Files:** `app/generate/[id]/page.tsx`, `app/api/funnel/[id]/route.ts`, `lib/storage.ts`
+
+---
+
+### US-10.4: Sandpack Error Boundary & Gemini Output Repair `BUILT`
+**As a** user, **I want** preview compilation errors to display a friendly message instead of crashing **so that** I can still use the editor and ask AI to fix the issue.
+
+**Acceptance Criteria:**
+- [x] React error boundary wraps SandpackProvider — catches "Cannot assign to read only property 'message'" and other Sandpack crashes
+- [x] Error boundary shows clean fallback: amber warning icon + "Preview compilation error" + error message + "Try asking the AI to fix this error"
+- [x] Error boundary resets when `refreshKey` changes (user triggers refresh or files change)
+- [x] `repairBraces` in gemini.ts handles common Gemini output issues: missing closing braces (add), extra closing braces (remove)
+- [x] `repairBraces` detects unclosed strings/template literals and skips repair when brace count is unreliable (prevents incorrect repairs that make code worse)
+- [x] `repairBraces` strips clearly invalid trailing characters (stray `'`, `"`, `,` on their own line) from JSON parsing artifacts
+- [x] `repairBraces` called on all generated files (not just truncated output path)
+
+**Files:** `components/react-preview.tsx`, `lib/gemini.ts`
+
+---
+
 ## Theme 11: Agentic Capabilities
 
 ### US-11.1: Tool Calls `PENDING`
@@ -926,9 +976,9 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 7. Canvas Top Bar | 8 | 5 | 1 | 2 |
 | 8. Code View & Export | 2 | 2 | 0 | 0 |
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
-| 10. Error Handling & Resilience | 1 | 1 | 0 | 0 |
+| 10. Error Handling & Resilience | 4 | 4 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **43** | **23** | **5** | **15** |
+| **TOTAL** | **46** | **26** | **5** | **15** |
 
 ---
 
