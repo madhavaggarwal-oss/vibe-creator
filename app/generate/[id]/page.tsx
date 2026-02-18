@@ -423,6 +423,11 @@ export default function GenerateResultPage() {
         setFunnel(data);
         setChatMessages(data.chatHistory || []);
         setEditModel(data.model);
+
+        // Capture snapshot for existing projects (populates cache over time)
+        if (data.files && Object.keys(data.files).length > 0) {
+          captureSnapshot(rawId);
+        }
       } catch {
         setError("Failed to load funnel");
       } finally {
@@ -430,7 +435,7 @@ export default function GenerateResultPage() {
       }
     }
     loadFunnel();
-  }, [rawId, router, startGeneration]);
+  }, [rawId, router, startGeneration, captureSnapshot]);
 
   // Cleanup timers on unmount
   useEffect(() => {

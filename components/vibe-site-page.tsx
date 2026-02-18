@@ -17,6 +17,7 @@ interface FunnelProject {
   firstPageTitle: string;
   createdAt: string;
   previewSlug: string;
+  hasSnapshot: boolean;
 }
 
 export default function VibeSitePage() {
@@ -452,10 +453,15 @@ export default function VibeSitePage() {
                   onClick={() => router.push(`/generate/${project.id}`)}
                   className="group text-left rounded-xl overflow-hidden bg-white border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200"
                 >
-                  {/* Preview thumbnail (cached snapshot) */}
+                  {/* Preview thumbnail */}
                   <div className="relative h-44 bg-gray-50 overflow-hidden">
                     <iframe
-                      src={`/api/funnel/${project.id}/snapshot`}
+                      src={project.hasSnapshot
+                        ? `/api/funnel/${project.id}/snapshot`
+                        : project.isReactProject
+                          ? `/preview-react/${project.id}`
+                          : `/preview/${project.id}/${project.previewSlug}/`
+                      }
                       className="w-[1440px] h-[900px] border-0 pointer-events-none"
                       style={{
                         transform: "scale(0.2)",
