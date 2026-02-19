@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 49 user stories | 29 Built | 5 Partial | 15 Pending**
+**Total: 51 user stories | 31 Built | 5 Partial | 15 Pending**
 
 ---
 
@@ -124,14 +124,20 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - [x] "Clone" button next to URL input
 - [x] Enter key in URL field triggers clone
 - [x] Auto-prepends `https://` if protocol missing
-- [x] URL passed to Firecrawl API for scraping (screenshot, markdown, HTML, branding, metadata)
+- [x] URL passed to Firecrawl API for scraping (screenshot, markdown, HTML, branding, metadata, images)
+- [x] Firecrawl explicitly requests `images` and `branding` formats for complete extraction
 - [x] If no custom prompt entered, auto-generates: "Clone this website: {url}"
 - [x] Scraped screenshot used as reference image for generation
 - [x] Scrape data (structure, content, branding) passed to AI for faithful reproduction
+- [x] Source image URLs (up to 50) extracted from Firecrawl and passed to AI for pixel-perfect cloning
+- [x] CLONE_SYSTEM_PROMPT instructs AI to use actual source image URLs instead of generating new AI images
+- [x] `__IMG:description__` markers used only as fallback when no matching source URL exists
+- [x] Markdown content limit increased to 60KB and HTML structure limit to 50KB for better fidelity
+- [x] EDIT_SYSTEM_PROMPT preserves external source URLs during subsequent edits of cloned sites
 - [x] Loading/scraping state shown with spinner ("Scraping...")
 - [x] Disabled state during scraping
 
-**Files:** `components/vibe-site-page.tsx`, `app/api/scrape/route.ts`, `lib/firecrawl.ts`
+**Files:** `components/vibe-site-page.tsx`, `app/api/scrape/route.ts`, `lib/firecrawl.ts`, `lib/gemini.ts`
 
 ---
 
@@ -726,6 +732,38 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 ---
 
+### US-7.9: Chat Input Redesign `BUILT`
+**As a** user, **I want** the chat input area to have a clean, modern design with textarea and bottom toolbar **so that** the editing experience feels polished and consistent across all states.
+
+**Acceptance Criteria:**
+- [x] Unified form layout across all states (generating, aborted, sending, ready): textarea on top, bottom toolbar below
+- [x] Textarea auto-expands as user types (min 1 row, max 5 rows)
+- [x] Bottom toolbar contains "+" attach button (left) and rounded send/stop button (right)
+- [x] Send button: rounded black circle with arrow icon when input has text
+- [x] Stop button: rounded black square icon during generation or sending
+- [x] "+" button disabled with tooltip during generation
+- [x] White background with gray border (`bg-white border-gray-200`)
+- [x] Plan mode toggle and voice button removed from chat input
+- [x] File input hidden, triggered by "+" button click
+- [x] Image thumbnails shown above textarea before sending (removable)
+
+**Files:** `app/generate/[id]/page.tsx`
+
+---
+
+### US-7.10: Stop Button Reliability `BUILT`
+**As a** user, **I want** the stop button to reliably cancel generation immediately **so that** I don't have to wait or refresh the page.
+
+**Acceptance Criteria:**
+- [x] `handleAbortGeneration` forces state transition immediately (clears progress/step timers and sets "aborted" state)
+- [x] Stop works even if the fetch already completed but response processing is in progress
+- [x] No reliance on the catch block to detect abort — state set proactively
+- [x] Stop button removed from canvas overlay (only in chat input area)
+
+**Files:** `app/generate/[id]/page.tsx`
+
+---
+
 ## Theme 8: Code View & Export
 
 ### US-8.1: Code Viewer with File Tree `BUILT`
@@ -927,8 +965,9 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - [x] Edit flow detects broken image patterns (not just `__IMG:` markers) and triggers image processing
 - [x] CSS fallback for broken images: gradient placeholder shown via `img[src=""]` and `img:not([src])` selectors
 - [x] JS runtime fallback: global error listener catches image load failures and applies gradient background
-- [x] CLONE_SYSTEM_PROMPT updated to use `__IMG:` markers instead of CSS gradients (cloned sites now get real images)
-- [x] EDIT_SYSTEM_PROMPT strengthened with detailed image instructions forbidding empty/placeholder/external URLs
+- [x] SYSTEM_PROMPT made consistent: removed conflicting "Use real Unsplash images" instruction, unified on `__IMG:` markers for all new generation
+- [x] CLONE_SYSTEM_PROMPT updated to use actual source image URLs for pixel-perfect cloning (with `__IMG:` marker fallback)
+- [x] EDIT_SYSTEM_PROMPT strengthened with detailed image instructions forbidding empty/placeholder URLs, preserving external URLs from cloned sites
 - [x] Placehold.co fallback uses light gray gradient with description text for any markers that fail generation
 
 **Files:** `lib/image-gen.ts`, `lib/gemini.ts`, `components/react-preview.tsx`, `app/api/chat/route.ts`
@@ -1032,12 +1071,12 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 4. Prompt Box (Canvas) | 5 | 2 | 1 | 2 |
 | 5. Chat Features | 6 | 1 | 1 | 4 |
 | 6. Context Management | 1 | 0 | 0 | 1 |
-| 7. Canvas Top Bar | 8 | 5 | 1 | 2 |
+| 7. Canvas Top Bar | 10 | 7 | 1 | 2 |
 | 8. Code View & Export | 2 | 2 | 0 | 0 |
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
 | 10. Error Handling & Resilience | 7 | 7 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **49** | **29** | **5** | **15** |
+| **TOTAL** | **51** | **31** | **5** | **15** |
 
 ---
 

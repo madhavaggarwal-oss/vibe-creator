@@ -336,7 +336,7 @@ Responsive Navbar: sticky top-0, backdrop-blur-xl, mobile hamburger with useStat
 - Valid TypeScript React (.tsx), functional components with hooks
 - IMPORTS: Every component, hook, icon, or library used in a file MUST be imported at the top of that file. Never reference an undefined variable. If you use lucide-react icons like <Scissors />, <Star />, <Phone />, you MUST have: import { Scissors, Star, Phone } from "lucide-react" — AND include lucide-react in /package.json dependencies.
 - Tailwind utility classes for ALL styling (use arbitrary values [] when needed for exact control)
-- Use real Unsplash images for hero, features, testimonials — pick photos relevant to the industry/content
+- Use __IMG:description__ markers for all images (they are auto-replaced with AI-generated images after code generation)
 - Realistic, relevant content — never lorem ipsum. Write compelling copy that sounds like real marketing
 - Every section must be substantial — no skeleton placeholders
 - Do NOT use min-h-screen on sections — use py-24/py-32 instead
@@ -413,14 +413,22 @@ Example structure:
    - Copy navigation menu items exactly as they appear
    - Copy footer links and text exactly
 
-5. IMAGES — AI-GENERATED WITH MARKERS
-   - For every image visible in the screenshot, use __IMG:description__ markers in src attributes
-   - FORMAT: <img src="__IMG:detailed description of the image__" alt="..." className="object-cover w-full h-full" />
-   - Write vivid 15-30 word descriptions matching what's visible in the screenshot (subject, mood, lighting, style, setting)
+5. IMAGES — USE ORIGINAL SOURCE IMAGES (CRITICAL)
+   You are provided with a list of SOURCE IMAGE URLs extracted from the original website. You MUST use these actual URLs to achieve pixel-perfect cloning.
+
+   RULES:
+   - Use the EXACT source image URLs provided in the "Source Image URLs" section below
+   - Match each image in the screenshot to the closest URL from the source list by analyzing the context (hero images, team photos, product shots, etc.)
+   - Place source URLs directly in src attributes: <img src="https://example.com/image.jpg" alt="..." className="object-cover w-full h-full" />
    - ALWAYS wrap images in a container with EXPLICIT Tailwind sizing: aspect-video, aspect-square, aspect-[W/H], h-N, or w-N h-N
-   - Example: <div className="w-full aspect-video rounded-2xl overflow-hidden"><img src="__IMG:elegant hair salon interior with warm lighting and modern styling chairs__" alt="Salon" className="object-cover w-full h-full" /></div>
-   - For avatars: <div className="w-12 h-12 rounded-full overflow-hidden"><img src="__IMG:professional headshot portrait of a smiling woman__" className="object-cover w-full h-full" /></div>
-   - NEVER use empty src="", /placeholder.svg, or external placeholder URLs (via.placeholder.com, picsum, unsplash)
+   - Example: <div className="w-full aspect-video rounded-2xl overflow-hidden"><img src="https://cdn.example.com/hero.jpg" alt="Hero" className="object-cover w-full h-full" /></div>
+   - For avatars: <div className="w-12 h-12 rounded-full overflow-hidden"><img src="https://cdn.example.com/avatar.jpg" className="object-cover w-full h-full" /></div>
+
+   FALLBACK (only when no matching source URL exists):
+   - If an image is visible in the screenshot but no matching URL is in the source list, use __IMG:description__ markers
+   - FORMAT: <img src="__IMG:vivid 15-30 word description matching what's visible in the screenshot__" alt="..." className="object-cover w-full h-full" />
+
+   NEVER use empty src="", /placeholder.svg, or external placeholder URLs (via.placeholder.com, picsum, placehold.co)
    - For logos: use styled text with the brand name in the correct font/color (NOT images)
    - For icons: use inline SVGs that approximate the icon's shape and color (NOT images)
 
@@ -491,7 +499,7 @@ Place <ScrollToTop /> inside HashRouter, before <Routes>.
 - Valid TypeScript React (.tsx), functional components with hooks
 - IMPORTS: Every component, hook, icon, or library used in a file MUST be imported at the top of that file. Never reference an undefined variable. If you use lucide-react icons, import them AND include lucide-react in /package.json dependencies.
 - Tailwind utility classes + arbitrary values for exact color matching
-- Use __IMG:description__ markers for ALL images — NEVER use external URLs, empty src, or placeholder paths
+- Use the EXACT source image URLs provided in the source images list. Only use __IMG:description__ markers as a fallback when no matching source URL exists. NEVER use empty src or placeholder paths
 - Use the EXACT text from the markdown content
 - Minimum 15 files total
 - Do NOT use min-h-screen on sections
@@ -540,6 +548,7 @@ To delete a file, set its value to null: "/src/components/OldComponent.tsx": nul
     - NEVER use empty src="", /placeholder.svg, /assets/*, via.placeholder.com, picsum.photos, or any external image URL
     - NEVER use CSS background-image with url() for content images — always use <img> tags
     - Existing images with blob URLs (*.vercel-storage.com) should be left unchanged
+    - Existing images with real external URLs (https://...) from cloned source sites should be left unchanged — do NOT replace them with markers
     - Markers are auto-replaced with AI-generated images after your response
 
 ═══════════════════════════════════════
@@ -891,6 +900,7 @@ export interface ScrapeDataForGeneration {
     title: string;
     description: string;
   };
+  images?: string[];
 }
 
 export async function generateFunnel(
@@ -926,6 +936,11 @@ export async function generateFunnel(
       ? `## Branding\nColors: ${JSON.stringify(scrapeData.branding.colors)}\nFonts: ${JSON.stringify(scrapeData.branding.fonts)}\nTypography: ${JSON.stringify(scrapeData.branding.typography)}\nSpacing: ${JSON.stringify(scrapeData.branding.spacing)}`
       : "## Branding\nNo branding data available. Infer colors, fonts, and spacing from the screenshot.";
 
+    // Build source images section
+    const sourceImages = scrapeData.images && scrapeData.images.length > 0
+      ? `## Source Image URLs (use these EXACT URLs in your code)\n${scrapeData.images.slice(0, 50).map((url, i) => `${i + 1}. ${url}`).join("\n")}`
+      : "## Source Image URLs\nNo source images extracted. Use __IMG:description__ markers for all images visible in the screenshot.";
+
     const cloneMessage = `Clone this website. Here is the scraped data:
 
 ## Page Title: ${scrapeData.metadata.title || "Unknown"}
@@ -933,11 +948,13 @@ export async function generateFunnel(
 
 ${brandingSection}
 
+${sourceImages}
+
 ## Content (Markdown)
-${scrapeData.markdown.slice(0, 30000)}
+${scrapeData.markdown.slice(0, 60000)}
 
 ## HTML Structure (for layout reference)
-${scrapeData.html.slice(0, 15000)}
+${scrapeData.html.slice(0, 50000)}
 
 ## User Instructions
 ${prompt || "Clone this website exactly as shown in the screenshot."}`;

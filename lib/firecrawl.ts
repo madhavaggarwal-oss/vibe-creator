@@ -35,6 +35,8 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
         "markdown",
         "html",
         "links",
+        "images",
+        "branding",
         { type: "screenshot", fullPage: true },
       ],
       onlyMainContent: false,

@@ -654,6 +654,11 @@ export default function GenerateResultPage() {
     if (generateAbortRef.current) {
       generateAbortRef.current.abort();
     }
+    // Force transition even if the abort doesn't trigger the catch block
+    // (e.g. if the fetch already completed but we're awaiting res.json())
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+    setGeneratingState("aborted");
   };
 
   const handleRetryGeneration = () => {
@@ -1415,186 +1420,129 @@ export default function GenerateResultPage() {
 
           {/* Chat input */}
           <div className="bg-[#F9FAFB] pl-6 pr-3 py-3">
-            {isGenerating ? (
-              <form className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 transition-all" onSubmit={(e) => e.preventDefault()}>
-                <input
-                  ref={chatFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
+            <input
+              ref={chatFileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                handleChatImageSelect(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            {chatPendingImages.length > 0 && !isGenerating && !isSending && (
+              <div className="px-1 mb-2">
+                <ImageUpload
+                  images={chatPendingImages}
+                  onRemove={(idx) => setChatPendingImages((prev) => prev.filter((_, i) => i !== idx))}
                 />
-                <button
-                  type="button"
-                  disabled
-                  title="Creation in Progress"
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-50 cursor-not-allowed"
-                >
-                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                </button>
-                <input
-                  type="text"
-                  disabled
-                  placeholder="Describe changes you want..."
-                  className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none cursor-not-allowed"
-                />
-                <button
-                  type="button"
-                  onClick={handleAbortGeneration}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white transition-all hover:bg-black"
-                  title="Stop generation"
-                >
-                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                    <rect x="4" y="4" width="16" height="16" rx="2" />
-                  </svg>
-                </button>
-              </form>
-            ) : isAborted ? (
-              <div className="space-y-2">
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (chatInput.trim()) {
-                      // Save the cancelled exchange to pre-generation messages
-                      if (pendingPrompt) {
-                        setPreGenMessages((prev) => [
-                          ...prev,
-                          { role: "user" as const, content: pendingPrompt, timestamp: pendingTimestamp || new Date().toISOString() },
-                          { role: "assistant" as const, content: "This message was cancelled.", timestamp: new Date().toISOString() },
-                        ]);
-                      }
-                      setPendingPrompt(chatInput.trim());
-                      setPendingTimestamp(new Date().toISOString());
-                      startGeneration(chatInput.trim(), pendingModel);
-                      setChatInput("");
-                    } else {
-                      handleRetryGeneration();
-                    }
-                  }}
-                  className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400/30 transition-all"
-                >
-                  <input
-                    ref={chatFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      handleChatImageSelect(e.target.files);
-                      e.target.value = "";
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => chatFileInputRef.current?.click()}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-colors"
-                  >
-                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                  </button>
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Describe what you want to build..."
-                    className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!chatInput.trim()}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </form>
-              </div>
-            ) : isSending ? (
-              <form className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 transition-all" onSubmit={(e) => e.preventDefault()}>
-                <button
-                  type="button"
-                  disabled
-                  title="Generation in progress"
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-50 cursor-not-allowed"
-                >
-                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                </button>
-                <input
-                  type="text"
-                  disabled
-                  placeholder="Describe changes you want..."
-                  className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none cursor-not-allowed"
-                />
-                <button
-                  type="button"
-                  onClick={handleStop}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white transition-all hover:bg-black"
-                  title="Stop generation"
-                >
-                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                    <rect x="4" y="4" width="16" height="16" rx="2" />
-                  </svg>
-                </button>
-              </form>
-            ) : (
-              <div className="space-y-2">
-                {chatPendingImages.length > 0 && (
-                  <div className="px-1">
-                    <ImageUpload
-                      images={chatPendingImages}
-                      onRemove={(idx) => setChatPendingImages((prev) => prev.filter((_, i) => i !== idx))}
-                    />
-                  </div>
-                )}
-                <form
-                  onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
-                  className="flex items-center gap-2 rounded-xl bg-white border border-gray-200 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400/30 transition-all"
-                >
-                  <input
-                    ref={chatFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      handleChatImageSelect(e.target.files);
-                      e.target.value = "";
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => chatFileInputRef.current?.click()}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-colors"
-                  >
-                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                  </button>
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Describe changes you want..."
-                    className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!chatInput.trim()}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </form>
               </div>
             )}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (isGenerating) return;
+                if (isSending) return;
+                if (isAborted) {
+                  if (chatInput.trim()) {
+                    if (pendingPrompt) {
+                      setPreGenMessages((prev) => [
+                        ...prev,
+                        { role: "user" as const, content: pendingPrompt, timestamp: pendingTimestamp || new Date().toISOString() },
+                        { role: "assistant" as const, content: "This message was cancelled.", timestamp: new Date().toISOString() },
+                      ]);
+                    }
+                    setPendingPrompt(chatInput.trim());
+                    setPendingTimestamp(new Date().toISOString());
+                    startGeneration(chatInput.trim(), pendingModel);
+                    setChatInput("");
+                  } else {
+                    handleRetryGeneration();
+                  }
+                  return;
+                }
+                handleSendMessage();
+              }}
+              className="rounded-2xl bg-white border border-gray-200 transition-all focus-within:border-gray-300"
+            >
+              {/* Textarea area */}
+              <div className="px-4 pt-3 pb-1">
+                <textarea
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      e.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  placeholder="Describe changes you want..."
+                  disabled={isGenerating || isSending}
+                  rows={1}
+                  className="w-full resize-none bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ minHeight: "24px", maxHeight: "120px" }}
+                  onInput={(e) => {
+                    const el = e.currentTarget;
+                    el.style.height = "24px";
+                    el.style.height = Math.min(el.scrollHeight, 120) + "px";
+                  }}
+                />
+              </div>
+
+              {/* Bottom toolbar */}
+              <div className="flex items-center justify-between px-3 pb-2.5">
+                <div className="flex items-center gap-1">
+                  {/* Attach image */}
+                  <button
+                    type="button"
+                    onClick={() => chatFileInputRef.current?.click()}
+                    disabled={isGenerating || isSending}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:text-gray-700 hover:bg-black/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Attach image"
+                  >
+                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Send / Stop button */}
+                {isGenerating ? (
+                  <button
+                    type="button"
+                    onClick={handleAbortGeneration}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-800 text-white transition-all hover:bg-black"
+                    title="Stop generation"
+                  >
+                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="4" y="4" width="16" height="16" rx="2" />
+                    </svg>
+                  </button>
+                ) : isSending ? (
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-800 text-white transition-all hover:bg-black"
+                    title="Stop editing"
+                  >
+                    <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="4" y="4" width="16" height="16" rx="2" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!chatInput.trim() && !isAborted}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-800 text-white transition-all hover:bg-black disabled:bg-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </form>
           </div>
           </div>
         </div>
