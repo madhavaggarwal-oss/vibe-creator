@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import { jsonrepair } from "jsonrepair";
 import { processImageMarkers } from "./image-gen";
+import { getActiveTrace } from "./langfuse";
+import { validateAndRepairFiles } from "./syntax-repair";
 
 function imagesToParts(images: string[]): Part[] {
   return images.map((dataUrl) => {
@@ -867,10 +869,31 @@ export async function editFunnel(
     contentParts.push(...imagesToParts(images));
   }
 
+  // Langfuse generation observation for edit LLM call
+  const trace = getActiveTrace();
+  const langfuseGen = trace?.generation({
+    name: "gemini-edit-funnel",
+    model: modelId,
+    input: contentParts.map((p: Part) =>
+      "text" in p && p.text ? { text: p.text } : { image: "inline-image" }
+    ),
+  });
+
   const result = await model.generateContent(contentParts, signal ? { signal } : undefined);
 
   const response = result.response;
   const text = response.text();
+
+  langfuseGen?.end({
+    output: text,
+    usage: {
+      input: response.usageMetadata?.promptTokenCount,
+      output: response.usageMetadata?.candidatesTokenCount,
+      total: response.usageMetadata?.totalTokenCount,
+    },
+    metadata: { finishReason: response.candidates?.[0]?.finishReason },
+  });
+
   const parsed = parseAIJson(text) as Record<string, unknown>;
 
   if (!parsed.files || typeof parsed.files !== "object") {
@@ -884,7 +907,20 @@ export async function editFunnel(
       ? String(parsed.message)
       : "Changes applied.";
 
-  return { message, files: parsed.files as Record<string, string | null> };
+  // Validate and repair code files (separate code files from deleted/null entries)
+  const rawFiles = parsed.files as Record<string, string | null>;
+  const codeFiles: Record<string, string> = {};
+  const otherFiles: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(rawFiles)) {
+    if (v === null) {
+      otherFiles[k] = null;
+    } else if (typeof v === "string") {
+      codeFiles[k] = v;
+    }
+  }
+  const repairedFiles = await validateAndRepairFiles(codeFiles);
+
+  return { message, files: { ...repairedFiles, ...otherFiles } };
 }
 
 export interface ScrapeDataForGeneration {
@@ -969,6 +1005,17 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
     contentParts.push(...imagesToParts(images));
   }
 
+  // Langfuse generation observation for generate LLM call
+  const trace = getActiveTrace();
+  const langfuseGen = trace?.generation({
+    name: "gemini-generate-funnel",
+    model: modelId,
+    input: contentParts.map((p: Part) =>
+      "text" in p && p.text ? { text: p.text } : { image: "inline-image" }
+    ),
+    metadata: { isCloneMode },
+  });
+
   // Pass abort signal to the Gemini API so the request is cancelled if the client disconnects
   const result = await model.generateContent(contentParts, signal ? { signal } : undefined);
 
@@ -979,6 +1026,16 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
   }
   const text = response.text();
   console.log(`[generateFunnel] Response length: ${text.length} chars, finish reason: ${finishReason}`);
+
+  langfuseGen?.end({
+    output: text,
+    usage: {
+      input: response.usageMetadata?.promptTokenCount,
+      output: response.usageMetadata?.candidatesTokenCount,
+      total: response.usageMetadata?.totalTokenCount,
+    },
+    metadata: { finishReason, responseLength: text.length },
+  });
   const parsed = parseAIJson(text) as Record<string, unknown>;
 
   if (!parsed.files || typeof parsed.files !== "object") {
@@ -1010,6 +1067,7 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
   // Process image markers: generate AI images and replace markers with URLs
   const filesWithImages = await processImageMarkers(files);
 
-  // Repair common brace issues (Gemini sometimes adds extra trailing braces)
-  return repairBraces(filesWithImages);
+  // Comprehensive syntax validation and repair (handles unterminated strings,
+  // template literals, block comments, and unbalanced brackets)
+  return await validateAndRepairFiles(filesWithImages);
 }
