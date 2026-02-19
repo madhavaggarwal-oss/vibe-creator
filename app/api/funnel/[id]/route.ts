@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFunnel, saveFunnel, isReactProject } from "@/lib/storage";
+import { getFunnel, saveFunnel, isReactProject, isValidFunnelId } from "@/lib/storage";
 import fs from "fs/promises";
 import path from "path";
 
@@ -73,6 +73,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (!isValidFunnelId(id)) {
+    return NextResponse.json({ error: "Invalid funnel ID" }, { status: 400 });
+  }
   const dataDir = path.join(process.cwd(), "data");
   const filePath = path.join(dataDir, `${id}.json`);
 

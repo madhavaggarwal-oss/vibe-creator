@@ -7,7 +7,7 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - **PARTIAL** — Core functionality exists but missing specific criteria
 - **PENDING** — Not yet implemented
 
-**Total: 46 user stories | 26 Built | 5 Partial | 15 Pending**
+**Total: 49 user stories | 29 Built | 5 Partial | 15 Pending**
 
 ---
 
@@ -601,7 +601,11 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 - [x] First/home page shown as "/"
 - [x] Route labels derived from component names (e.g., "About", "Services")
 - [x] Selecting a route navigates the Sandpack preview to that hash route
-- [x] Dropdown only appears when multiple routes exist
+- [x] Dropdown always visible (even for single-page sites with just "/")
+- [x] Click area extends from page name to near the action icons (full bar width)
+- [x] Dropdown width matches the click area
+- [x] Checkmark icon shown next to the currently active page
+- [x] No background highlight on hover for the click area
 
 **Files:** `app/generate/[id]/page.tsx` (pageRoutes useMemo)
 
@@ -912,6 +916,61 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 
 ---
 
+### US-10.5: Image Generation Reliability `BUILT`
+**As a** user, **I want** AI-generated images to always appear in my site **so that** pages look complete and professional without blank spaces.
+
+**Acceptance Criteria:**
+- [x] Image generation uses concurrency limit (max 3 parallel Gemini calls) to avoid rate limiting
+- [x] Failed image generation retries up to 3 times with exponential backoff (1s, 2s delays)
+- [x] Broken/placeholder image src detection: scans for empty `src=""`, `/placeholder.svg`, `./assets/*`, external placeholder URLs (via.placeholder.com, picsum, etc.)
+- [x] Broken src values auto-converted to `__IMG:description__` markers using alt text, so the image pipeline generates real images
+- [x] Edit flow detects broken image patterns (not just `__IMG:` markers) and triggers image processing
+- [x] CSS fallback for broken images: gradient placeholder shown via `img[src=""]` and `img:not([src])` selectors
+- [x] JS runtime fallback: global error listener catches image load failures and applies gradient background
+- [x] CLONE_SYSTEM_PROMPT updated to use `__IMG:` markers instead of CSS gradients (cloned sites now get real images)
+- [x] EDIT_SYSTEM_PROMPT strengthened with detailed image instructions forbidding empty/placeholder/external URLs
+- [x] Placehold.co fallback uses light gray gradient with description text for any markers that fail generation
+
+**Files:** `lib/image-gen.ts`, `lib/gemini.ts`, `components/react-preview.tsx`, `app/api/chat/route.ts`
+
+---
+
+### US-10.6: Sandpack Preview Resilience `BUILT`
+**As a** user, **I want** the live preview to handle AI-generated code issues gracefully **so that** I always see a working preview even if the AI output has problems.
+
+**Acceptance Criteria:**
+- [x] Auto-detection of missing npm packages from import statements in generated source files
+- [x] Auto-injection of missing lucide-react imports: scans JSX for unresolved PascalCase components and adds import statements
+- [x] CSS transformation applied to ALL `.css` files (not just `/src/index.css`): strips `@tailwind`, `@import tailwindcss`, `@apply`, `@layer` directives
+- [x] Auto-replacement of `BrowserRouter` → `HashRouter` in imports and JSX (BrowserRouter doesn't work in iframe)
+- [x] Fix opacity:0 initial states in reveal/animation CSS classes (IntersectionObserver unreliable in iframe)
+- [x] Native `<select>` elements styled with `appearance: none` to remove macOS native dropdown appearance
+- [x] Image containers with hover:scale effects auto-clipped via CSS `:has()` selector to prevent overflow
+- [x] Compile error overlay using `useSandpack()` hook shows clean error messages instead of Sandpack's confusing default
+- [x] System prompts updated with explicit import rules for all components, hooks, icons, and libraries
+- [x] System prompts emphasize `overflow-hidden` on containers with hover effects and images
+
+**Files:** `components/react-preview.tsx`, `lib/gemini.ts`
+
+---
+
+### US-10.7: Code Review Fixes `BUILT`
+**As a** developer, **I want** the codebase to follow best practices for security, robustness, and maintainability **so that** the app is production-ready.
+
+**Acceptance Criteria:**
+- [x] Variable shadowing fixed: `path` → `filePath` in `chat/route.ts` to avoid conflict with Node.js `path` module
+- [x] Correct byte size calculation: `Buffer.byteLength(content, "utf-8")` instead of `new Blob([content]).size` in server-side code
+- [x] Silent catch blocks replaced with `console.error` in `vibe-site-page.tsx` and `projects/page.tsx`
+- [x] User feedback toast shown when project delete fails
+- [x] Error state cleared at start of generation (`setError(null)` in `handleGenerate`)
+- [x] Dead code removed: unused `generating-overlay.tsx` and `prompt-form.tsx` components deleted
+- [x] AI response validation made lenient: coerces non-string `message` values instead of rejecting valid file changes
+- [x] `repairBraces` restricted to initial generation only (was corrupting files during edits)
+
+**Files:** `app/api/chat/route.ts`, `app/api/funnel/[id]/code/route.ts`, `components/vibe-site-page.tsx`, `app/projects/page.tsx`, `lib/gemini.ts`
+
+---
+
 ## Theme 11: Agentic Capabilities
 
 ### US-11.1: Tool Calls `PENDING`
@@ -976,9 +1035,9 @@ This document maps all Phase 1 requirements against the current codebase. Each t
 | 7. Canvas Top Bar | 8 | 5 | 1 | 2 |
 | 8. Code View & Export | 2 | 2 | 0 | 0 |
 | 9. Canvas Preview & Interaction | 4 | 3 | 1 | 0 |
-| 10. Error Handling & Resilience | 4 | 4 | 0 | 0 |
+| 10. Error Handling & Resilience | 7 | 7 | 0 | 0 |
 | 11. Agentic Capabilities | 2 | 0 | 0 | 2 |
-| **TOTAL** | **46** | **26** | **5** | **15** |
+| **TOTAL** | **49** | **29** | **5** | **15** |
 
 ---
 

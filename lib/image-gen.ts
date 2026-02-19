@@ -229,6 +229,42 @@ async function compressImage(
  * Generate images via Gemini and upload to Vercel Blob.
  * Returns a map from marker string → blob URL.
  */
+const MAX_CONCURRENT = 3; // Limit parallel Gemini image API calls to avoid rate limiting
+const MAX_RETRIES = 3;
+
+/** Simple delay helper */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Process items with a concurrency limit.
+ * Runs at most `limit` tasks in parallel.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const idx = nextIndex++;
+      try {
+        results[idx] = { status: "fulfilled", value: await fn(items[idx]) };
+      } catch (reason) {
+        results[idx] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 async function generateAndUploadImages(
   markers: ImageMarker[]
 ): Promise<Map<string, string>> {
@@ -239,57 +275,62 @@ async function generateAndUploadImages(
   const capped = markers.slice(0, MAX_IMAGES);
   const urlMap = new Map<string, string>();
 
-  const results = await Promise.allSettled(
-    capped.map(async (marker) => {
-      const generate = async (): Promise<{ marker: string; url: string }> => {
-        const prompt = `Generate a high-quality, photorealistic image: ${marker.description}. Image dimensions: ${marker.width}x${marker.height} pixels. No text or watermarks.`;
+  const results = await mapWithConcurrency(capped, MAX_CONCURRENT, async (marker) => {
+    const generate = async (): Promise<{ marker: string; url: string }> => {
+      const prompt = `Generate a high-quality, photorealistic image: ${marker.description}. Image dimensions: ${marker.width}x${marker.height} pixels. No text or watermarks.`;
 
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash-image",
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          config: {
-            responseModalities: ["TEXT", "IMAGE"],
-          },
-        });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-image",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          responseModalities: ["TEXT", "IMAGE"],
+        },
+      });
 
-        const parts = response.candidates?.[0]?.content?.parts;
-        if (!parts) throw new Error("No parts in response");
+      const parts = response.candidates?.[0]?.content?.parts;
+      if (!parts) throw new Error("No parts in response");
 
-        const imagePart = parts.find((p) => p.inlineData?.mimeType?.startsWith("image/"));
-        if (!imagePart?.inlineData) throw new Error("No image data in response");
+      const imagePart = parts.find((p) => p.inlineData?.mimeType?.startsWith("image/"));
+      if (!imagePart?.inlineData) throw new Error("No image data in response");
 
-        const { data } = imagePart.inlineData;
-        if (!data) throw new Error("Empty image data");
+      const { data } = imagePart.inlineData;
+      if (!data) throw new Error("Empty image data");
 
-        const rawBuffer = Buffer.from(data, "base64");
-        const compressed = await compressImage(rawBuffer, marker.width, marker.height);
-        const filename = `generated/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const rawBuffer = Buffer.from(data, "base64");
+      const compressed = await compressImage(rawBuffer, marker.width, marker.height);
+      const filename = `generated/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 
-        const blob = await put(filename, compressed, {
-          access: "public",
-          contentType: "image/jpeg",
-        });
+      const blob = await put(filename, compressed, {
+        access: "public",
+        contentType: "image/jpeg",
+      });
 
-        console.log(`[image-gen] ${marker.width}×${marker.height} image: ${(rawBuffer.length / 1024).toFixed(0)}KB → ${(compressed.length / 1024).toFixed(0)}KB`);
+      console.log(`[image-gen] ${marker.width}×${marker.height} image: ${(rawBuffer.length / 1024).toFixed(0)}KB → ${(compressed.length / 1024).toFixed(0)}KB`);
 
-        return { marker: marker.full, url: blob.url };
-      };
+      return { marker: marker.full, url: blob.url };
+    };
 
-      // Retry once on failure
+    // Retry with exponential backoff
+    let lastErr: Error | undefined;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         return await generate();
       } catch (err) {
-        console.warn(`[image-gen] First attempt failed, retrying...`, (err as Error).message);
-        return await generate();
+        lastErr = err as Error;
+        console.warn(`[image-gen] Attempt ${attempt}/${MAX_RETRIES} failed: ${lastErr.message}`);
+        if (attempt < MAX_RETRIES) {
+          await delay(1000 * attempt); // 1s, 2s backoff
+        }
       }
-    })
-  );
+    }
+    throw lastErr;
+  });
 
   for (const result of results) {
     if (result.status === "fulfilled") {
       urlMap.set(result.value.marker, result.value.url);
     } else {
-      console.warn("[image-gen] Failed to generate image:", result.reason);
+      console.warn("[image-gen] Failed to generate image after retries:", result.reason);
     }
   }
 
@@ -319,13 +360,14 @@ export function replaceImageMarkers(
       continue;
     }
 
-    result[path] = content.replace(MARKER_REGEX, (full) => {
+    result[path] = content.replace(MARKER_REGEX, (full, desc) => {
       const url = urlMap.get(full);
       if (url) return url;
 
-      // Fallback: placehold.co with detected dimensions
+      // Fallback: placehold.co with subtle gradient and short description
       const dims = dimsLookup.get(full) || { width: 800, height: 600 };
-      return `https://placehold.co/${dims.width}x${dims.height}/1a1a2e/ffffff?text=Image`;
+      const shortDesc = (desc || "Image").trim().slice(0, 30);
+      return `https://placehold.co/${dims.width}x${dims.height}/e2e8f0/64748b?text=${encodeURIComponent(shortDesc)}`;
     });
   }
 
@@ -333,14 +375,129 @@ export function replaceImageMarkers(
 }
 
 /**
- * Orchestrator: normalize legacy markers → extract markers → generate images → replace markers.
+ * Patterns that indicate a broken/placeholder image src in AI-generated code.
+ * These get converted to __IMG:description__ markers so the image pipeline can replace them.
+ */
+const BROKEN_SRC_PATTERNS = [
+  /^\/placeholder/i,            // /placeholder.svg, /placeholder.png, etc.
+  /^\.?\/?assets\//i,           // ./assets/image.jpg, /assets/hero.png
+  /^\.?\/?images?\//i,          // ./images/photo.jpg, /image/hero.png
+  /^\/public\//i,               // /public/image.jpg
+  /^https?:\/\/via\.placeholder/i, // via.placeholder.com
+  /^https?:\/\/placehold\./i,   // placehold.co, placehold.it
+  /^https?:\/\/placekitten/i,   // placekitten.com
+  /^https?:\/\/picsum/i,        // picsum.photos
+  /^https?:\/\/dummyimage/i,    // dummyimage.com
+  /^https?:\/\/fakeimg/i,       // fakeimg.pl
+  /^https?:\/\/loremflickr/i,   // loremflickr.com
+  /^data:image\/svg\+xml/i,     // inline SVG data URIs used as placeholders
+];
+
+/** Src values that are effectively empty/broken */
+function isBrokenSrc(src: string): boolean {
+  const trimmed = src.trim();
+  if (!trimmed || trimmed === "#" || trimmed === "about:blank") return true;
+  return BROKEN_SRC_PATTERNS.some((re) => re.test(trimmed));
+}
+
+/** Already a valid image: blob URL, data URI (non-SVG), or our marker format */
+function isValidImageSrc(src: string): boolean {
+  const trimmed = src.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("__IMG:")) return true;
+  if (trimmed.startsWith("https://") && trimmed.includes("blob.vercel-storage.com")) return true;
+  if (trimmed.startsWith("data:image/") && !trimmed.startsWith("data:image/svg+xml")) return true;
+  return false;
+}
+
+/**
+ * Scan TSX/JSX/HTML files for <img> tags with broken/placeholder/empty src attributes
+ * and convert them to __IMG:description__ markers using the alt text or context.
+ *
+ * This catches cases where the AI doesn't use the marker format:
+ * - Empty src: <img src="" alt="Team photo" />
+ * - Placeholder paths: <img src="/placeholder.svg" alt="Hero" />
+ * - External placeholder services: <img src="https://via.placeholder.com/800x600" />
+ */
+function fixBrokenImageSrcs(
+  files: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  let fixCount = 0;
+
+  // Match <img with src="..." and optionally alt="..."
+  // Handles both JSX (className=) and HTML (class=) style
+  const IMG_TAG_REGEX = /<img\s+[^>]*?src\s*=\s*(?:"([^"]*)"|'([^']*)'|\{["`]([^"`]*)["`]\})[^>]*?\/?>/gi;
+  const ALT_REGEX = /alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
+  for (const [filePath, content] of Object.entries(files)) {
+    if (typeof content !== "string") {
+      result[filePath] = content;
+      continue;
+    }
+
+    // Only process component/page files
+    if (!/\.(tsx|jsx|html)$/.test(filePath)) {
+      result[filePath] = content;
+      continue;
+    }
+
+    result[filePath] = content.replace(IMG_TAG_REGEX, (fullTag, src1, src2, src3) => {
+      const src = (src1 ?? src2 ?? src3 ?? "").trim();
+
+      // Already valid — leave it alone
+      if (isValidImageSrc(src)) return fullTag;
+
+      // Not a broken pattern we recognize — leave external URLs alone if they look real
+      if (!isBrokenSrc(src) && src.startsWith("http")) return fullTag;
+
+      // Skip if src is a JS expression (dynamic src like {variable})
+      if (!src1 && !src2 && !src3 && /src\s*=\s*\{/.test(fullTag)) return fullTag;
+
+      // Extract alt text for the marker description
+      const altMatch = fullTag.match(ALT_REGEX);
+      const alt = (altMatch?.[1] ?? altMatch?.[2] ?? "").trim();
+
+      // Build a descriptive marker from alt text or a generic description
+      let description: string;
+      if (alt && alt.length > 3 && !/^(image|photo|picture|img|placeholder)$/i.test(alt)) {
+        // Use alt text as the basis, but make it more descriptive for image generation
+        description = `high quality professional photo of ${alt.toLowerCase()}, well-lit, detailed`;
+      } else {
+        // Generic fallback based on file context
+        const contextHint = filePath.replace(/.*\//, "").replace(/\.(tsx|jsx|html)$/, "");
+        description = `high quality professional photo for ${contextHint.toLowerCase()} section, well-lit, modern setting`;
+      }
+
+      const marker = `__IMG:${description}__`;
+      fixCount++;
+
+      // Replace only the src value within the tag
+      return fullTag
+        .replace(/src\s*=\s*(?:"[^"]*"|'[^']*'|\{["`][^"`]*["`]\})/, `src="${marker}"`)
+        .replace(/src\s*=\s*""/, `src="${marker}"`);
+    });
+  }
+
+  if (fixCount > 0) {
+    console.log(`[image-gen] Fixed ${fixCount} broken/placeholder image src attributes → markers`);
+  }
+
+  return result;
+}
+
+/**
+ * Orchestrator: fix broken srcs → normalize legacy markers → extract markers → generate images → replace markers.
  * No-ops if no markers found or BLOB_READ_WRITE_TOKEN is missing.
  */
 export async function processImageMarkers(
   files: Record<string, string>
 ): Promise<Record<string, string>> {
-  // Backward compat: normalize __IMG[N:N]:desc__ → __IMG:desc__
-  const normalized = normalizeLegacyMarkers(files);
+  // Layer 1: Convert broken/placeholder image src values into __IMG: markers
+  const fixed = fixBrokenImageSrcs(files);
+
+  // Layer 2: Normalize legacy __IMG[N:N]:desc__ → __IMG:desc__
+  const normalized = normalizeLegacyMarkers(fixed);
 
   const markers = extractImageMarkers(normalized);
   if (markers.length === 0) return normalized;

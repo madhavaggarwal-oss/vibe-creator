@@ -31,6 +31,27 @@ After completing a change, **do NOT immediately commit/push or update PRD-Phase1
 - `data/` — local JSON project storage (git-ignored)
 - `PRD-Phase1.md` — source of truth for all Phase 1 user stories and their status
 
+## Development Principles
+
+### Consistency First
+- When making changes to any UI pattern, behavior, or styling, **audit all other locations** in the codebase where the same or similar pattern exists and apply changes consistently. Analyze first before implementing — the experience must be coherent across the entire app.
+
+### Clarify Before Implementing
+- If a request has ambiguity, edge cases, or multiple valid approaches, **ask questions and get clarity before writing code**. Think holistically — consider how changes interact with existing features, different states (loading, error, empty, generating, aborted), and all user flows.
+
+### Production-Quality Code
+- No shortcuts, hardcoding, or hacks. Follow industry-standard best practices.
+- Build for stability and robustness — the codebase must be production-ready.
+- Use proper abstractions, type safety, error handling, and clean architecture.
+
+### Vercel Deployment Compatibility
+- All code must work when deployed to Vercel. Be mindful of:
+  - **Storage**: File-system storage (`/data/*.json`) only works locally. For Vercel deployment, storage must use a database or external service (current local storage is acceptable for development but should be noted as a deployment concern).
+  - **API routes**: Must be stateless and compatible with serverless functions.
+  - **Environment variables**: Secrets must come from `process.env`, never hardcoded.
+  - **Build output**: Ensure `npm run build` passes cleanly with no errors or warnings that would block deployment.
+  - **Edge cases**: No reliance on persistent server memory, local file system writes in production, or long-running processes that exceed serverless timeouts.
+
 ## Key Conventions
 
 - Use Tailwind CSS utility classes for all styling (no CSS modules)

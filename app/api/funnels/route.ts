@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 
@@ -51,8 +52,8 @@ export async function GET() {
           previewSlug: funnel.pages?.[0]?.slug || "home",
           hasSnapshot,
         });
-      } catch {
-        // skip malformed files
+      } catch (err) {
+        console.error(`[funnels] Failed to parse ${file}:`, err);
       }
     }
 
@@ -61,8 +62,9 @@ export async function GET() {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
-    return Response.json(funnels);
-  } catch {
-    return Response.json([]);
+    return NextResponse.json(funnels);
+  } catch (err) {
+    console.error("[funnels] Failed to list funnels:", err);
+    return NextResponse.json([], { status: 500 });
   }
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isValidFunnelId } from "@/lib/storage";
 import fs from "fs/promises";
 import path from "path";
 
@@ -8,6 +9,15 @@ async function ensureSnapshotsDir() {
   await fs.mkdir(SNAPSHOTS_DIR, { recursive: true });
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function placeholderHtml(name?: string): string {
   return `<!DOCTYPE html>
 <html><head><style>
@@ -15,7 +25,7 @@ body{margin:0;height:100vh;display:flex;align-items:center;justify-content:cente
 background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
 font-family:system-ui,sans-serif;color:#fff;text-align:center}
 h2{font-size:1.5rem;font-weight:600;opacity:0.9}
-</style></head><body><h2>${name ? name.replace(/</g, "&lt;") : "Preview"}</h2></body></html>`;
+</style></head><body><h2>${name ? escapeHtml(name) : "Preview"}</h2></body></html>`;
 }
 
 export async function GET(
@@ -23,6 +33,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (!isValidFunnelId(id)) {
+    return new NextResponse("Invalid ID", { status: 400 });
+  }
   const filePath = path.join(SNAPSHOTS_DIR, `${id}.html`);
 
   try {
@@ -49,6 +62,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (!isValidFunnelId(id)) {
+    return NextResponse.json({ error: "Invalid funnel ID" }, { status: 400 });
+  }
 
   try {
     const body = await req.json();
@@ -72,6 +88,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (!isValidFunnelId(id)) {
+    return NextResponse.json({ error: "Invalid funnel ID" }, { status: 400 });
+  }
   const filePath = path.join(SNAPSHOTS_DIR, `${id}.html`);
 
   try {

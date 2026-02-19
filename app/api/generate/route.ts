@@ -18,7 +18,10 @@ export async function POST(request: NextRequest) {
     const modelId = model || "gemini-3-flash-preview";
     const id = uuidv4();
 
-    const imageList = Array.isArray(images) ? images.filter((i: unknown) => typeof i === "string") : [];
+    const MAX_IMAGES = 10;
+    const imageList = Array.isArray(images)
+      ? images.filter((i: unknown) => typeof i === "string").slice(0, MAX_IMAGES)
+      : [];
 
     // Pass the request abort signal directly to generateFunnel so the Gemini API
     // call is actually cancelled when the client disconnects (not just ignored).

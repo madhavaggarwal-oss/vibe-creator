@@ -11,12 +11,7 @@ function imagesToParts(images: string[]): Part[] {
   });
 }
 
-export const MODELS = [
-  { id: "gemini-3-flash-preview", label: "Gemini 3 Flash (Default)" },
-  { id: "gemini-3-pro-preview", label: "Gemini 3 Pro (Most Powerful)" },
-] as const;
-
-export type ModelId = (typeof MODELS)[number]["id"];
+// Models are defined in components/model-data.ts (single source of truth)
 
 const SYSTEM_PROMPT = `You are a world-class UI/UX designer and frontend engineer. You design websites that look like they were built by top design agencies — think Linear, Vercel, Stripe, Framer, Raycast quality. You produce production-grade React + TypeScript + Tailwind CSS projects.
 
@@ -125,7 +120,7 @@ MODERN UI PATTERNS:
 BUTTONS & INTERACTIVE ELEMENTS:
 - Primary CTA: gradient background (bg-gradient-to-r from-blue-500 to-blue-600) with hover brightness/scale, rounded-xl, px-8 py-4
 - Secondary: bg-white/10 hover:bg-white/20 border border-white/20 (dark) or bg-gray-100 hover:bg-gray-200 (light)
-- Micro-interactions: hover:scale-[1.02] transition-all duration-300 on cards
+- Micro-interactions: hover:scale-[1.02] transition-all duration-300 on cards. IMPORTANT: Any container with hover:scale or images with hover:scale MUST have overflow-hidden to prevent images from breaking out of containers on hover
 - Button group patterns: primary + ghost/outline side by side
 - Pill-shaped badges for tags: rounded-full px-4 py-1.5 text-xs font-medium bg-blue-500/10 text-blue-400
 
@@ -161,6 +156,7 @@ USAGE RULES:
 8. For logo placeholders: use styled text in containers (not images)
 9. Decorative backgrounds still use CSS gradients, animated blurred orbs, and patterns
 10. NEVER use images as direct background-image — always use <img> tags inside positioned containers
+11. Image containers with hover effects (hover:scale, group-hover:scale) MUST always have overflow-hidden to prevent images from breaking out of their container on hover
 
 ═══════════════════════════════════════
   FONTS — CRITICAL TECHNICAL RULE
@@ -338,6 +334,7 @@ Responsive Navbar: sticky top-0, backdrop-blur-xl, mobile hamburger with useStat
 ═══════════════════════════════════════
 
 - Valid TypeScript React (.tsx), functional components with hooks
+- IMPORTS: Every component, hook, icon, or library used in a file MUST be imported at the top of that file. Never reference an undefined variable. If you use lucide-react icons like <Scissors />, <Star />, <Phone />, you MUST have: import { Scissors, Star, Phone } from "lucide-react" — AND include lucide-react in /package.json dependencies.
 - Tailwind utility classes for ALL styling (use arbitrary values [] when needed for exact control)
 - Use real Unsplash images for hero, features, testimonials — pick photos relevant to the industry/content
 - Realistic, relevant content — never lorem ipsum. Write compelling copy that sounds like real marketing
@@ -416,15 +413,16 @@ Example structure:
    - Copy navigation menu items exactly as they appear
    - Copy footer links and text exactly
 
-5. IMAGES AND ASSETS — NO EXTERNAL URLS
-   - ABSOLUTELY DO NOT use any external image URLs (no https://... images)
-   - For every image visible in the screenshot, create a CSS gradient placeholder that matches the COLOR TONE:
-     • Dark photo → from-slate-700 to-slate-900
-     • Bright/colorful → from-blue-400 to-purple-500 (match the dominant hue)
-     • Product photo → from-gray-200 to-gray-300 with centered icon
-   - Match image aspect ratios and container sizes from the screenshot
-   - For logos: use styled text with the brand name in the correct font/color
-   - For icons: use inline SVGs that approximate the icon's shape and color
+5. IMAGES — AI-GENERATED WITH MARKERS
+   - For every image visible in the screenshot, use __IMG:description__ markers in src attributes
+   - FORMAT: <img src="__IMG:detailed description of the image__" alt="..." className="object-cover w-full h-full" />
+   - Write vivid 15-30 word descriptions matching what's visible in the screenshot (subject, mood, lighting, style, setting)
+   - ALWAYS wrap images in a container with EXPLICIT Tailwind sizing: aspect-video, aspect-square, aspect-[W/H], h-N, or w-N h-N
+   - Example: <div className="w-full aspect-video rounded-2xl overflow-hidden"><img src="__IMG:elegant hair salon interior with warm lighting and modern styling chairs__" alt="Salon" className="object-cover w-full h-full" /></div>
+   - For avatars: <div className="w-12 h-12 rounded-full overflow-hidden"><img src="__IMG:professional headshot portrait of a smiling woman__" className="object-cover w-full h-full" /></div>
+   - NEVER use empty src="", /placeholder.svg, or external placeholder URLs (via.placeholder.com, picsum, unsplash)
+   - For logos: use styled text with the brand name in the correct font/color (NOT images)
+   - For icons: use inline SVGs that approximate the icon's shape and color (NOT images)
 
 6. LAYOUT PRECISION
    - Use the HTML structure as reference for element nesting and hierarchy
@@ -491,8 +489,9 @@ Place <ScrollToTop /> inside HashRouter, before <Routes>.
 ═══════════════════════════════════════
 
 - Valid TypeScript React (.tsx), functional components with hooks
+- IMPORTS: Every component, hook, icon, or library used in a file MUST be imported at the top of that file. Never reference an undefined variable. If you use lucide-react icons, import them AND include lucide-react in /package.json dependencies.
 - Tailwind utility classes + arbitrary values for exact color matching
-- ZERO external image URLs — CSS gradients and SVGs only
+- Use __IMG:description__ markers for ALL images — NEVER use external URLs, empty src, or placeholder paths
 - Use the EXACT text from the markdown content
 - Minimum 15 files total
 - Do NOT use min-h-screen on sections
@@ -529,12 +528,19 @@ To delete a file, set its value to null: "/src/components/OldComponent.tsx": nul
 4. COLORS: Use ONLY Tailwind's built-in default colors (blue-500, slate-900, etc.). Do NOT define custom colors.
 5. PRESERVE QUALITY: Maintain all animations, hover effects, responsive layout, and visual polish. Never degrade existing design.
 6. NEW COMPONENTS: Place in appropriate directories (/src/components/, /src/pages/, /src/lib/).
-7. IMPORTS: Ensure all imports are correct. When creating new files, make sure they are imported where needed.
+7. IMPORTS: Every component, hook, icon, or library used in a file MUST be imported at the top of that file. Never use an undefined variable. If you use lucide-react icons (e.g. <Scissors />, <Star />), you MUST import them: import { Scissors, Star } from "lucide-react". When creating new files, make sure they are imported where needed.
 8. CONTENT: Use realistic, relevant content. Never use lorem ipsum.
 9. TYPES: All components must be valid TypeScript with proper types.
 10. TAILWIND: Use Tailwind utility classes for styling. Do NOT use @apply or @tailwind directives in CSS.
 11. ANIMATIONS: Never use opacity: 0 as a default state that relies on JavaScript to become visible.
-12. IMAGES: For new images, use __IMG:description__ markers in src attributes (e.g. <img src="__IMG:description here" />). Wrap in containers with explicit Tailwind sizing (aspect-[W/H], h-N, w-N h-N). They will be replaced with AI-generated images automatically.
+12. IMAGES: For ALL new images, use __IMG:description__ markers directly in src attributes.
+    - FORMAT: <img src="__IMG:vivid 15-30 word description__" alt="..." className="object-cover w-full h-full" />
+    - ALWAYS wrap in a container with explicit Tailwind sizing: aspect-video, aspect-square, aspect-[W/H], h-N, or w-N h-N
+    - Write detailed descriptions: subject, mood, lighting, style, setting (e.g. "modern hair salon interior with warm ambient lighting and sleek styling stations")
+    - NEVER use empty src="", /placeholder.svg, /assets/*, via.placeholder.com, picsum.photos, or any external image URL
+    - NEVER use CSS background-image with url() for content images — always use <img> tags
+    - Existing images with blob URLs (*.vercel-storage.com) should be left unchanged
+    - Markers are auto-replaced with AI-generated images after your response
 
 ═══════════════════════════════════════
   UNDERSTANDING USER INTENT
@@ -858,11 +864,18 @@ export async function editFunnel(
   const text = response.text();
   const parsed = parseAIJson(text) as Record<string, unknown>;
 
-  if (!parsed.message || !parsed.files || typeof parsed.files !== "object") {
-    throw new Error("Invalid response from AI: expected { message, files: {...} }");
+  if (!parsed.files || typeof parsed.files !== "object") {
+    throw new Error("Invalid response from AI: expected { files: {...} }");
   }
 
-  return parsed as { message: string; files: Record<string, string | null> };
+  // Coerce message to string — Gemini sometimes returns it as a non-string type
+  const message = typeof parsed.message === "string"
+    ? parsed.message
+    : parsed.message != null
+      ? String(parsed.message)
+      : "Changes applied.";
+
+  return { message, files: parsed.files as Record<string, string | null> };
 }
 
 export interface ScrapeDataForGeneration {

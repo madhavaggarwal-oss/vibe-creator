@@ -18,7 +18,7 @@ export async function GET(
       name: path.split("/").pop() || path,
       path,
       content,
-      size: new Blob([content]).size,
+      size: Buffer.byteLength(content, "utf-8"),
     }));
 
     return NextResponse.json({ files });
@@ -30,7 +30,7 @@ export async function GET(
     path: `pages/${page.slug}.html`,
     title: page.title,
     content: page.html,
-    size: new Blob([page.html]).size,
+    size: Buffer.byteLength(page.html, "utf-8"),
   }));
 
   return NextResponse.json({ files });

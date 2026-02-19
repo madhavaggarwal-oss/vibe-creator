@@ -2,16 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-
-interface FunnelProject {
-  id: string;
-  prompt: string;
-  model: string;
-  pageCount: number;
-  firstPageTitle: string;
-  createdAt: string;
-  previewSlug: string;
-}
+import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
 
 export default function FunnelsPage() {
   const router = useRouter();
@@ -23,26 +14,14 @@ export default function FunnelsPage() {
       try {
         const res = await fetch("/api/funnels");
         if (res.ok) setProjects(await res.json());
-      } catch {
-        // silent
+      } catch (err) {
+        console.error("[FunnelsPage] Failed to load projects:", err);
       } finally {
         setLoading(false);
       }
     }
     load();
   }, []);
-
-  const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-    }) + " " + d.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
 
   return (
     <div className="px-8 py-6">
@@ -122,7 +101,7 @@ export default function FunnelsPage() {
                 Last Updated
               </th>
               <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                Pages
+                Type
               </th>
               <th className="w-10 px-3 py-3"></th>
             </tr>
@@ -148,14 +127,17 @@ export default function FunnelsPage() {
                   className="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
                 >
                   <td className="px-5 py-4 text-sm font-medium text-gray-800">
-                    {project.firstPageTitle}
+                    {project.name}
                   </td>
                   <td className="px-5 py-4 text-sm text-gray-500">
-                    {formatDate(project.createdAt)}
+                    {formatRelativeDate(project.createdAt)}
                   </td>
                   <td className="px-5 py-4">
                     <span className="text-sm font-medium text-blue-600">
-                      {project.pageCount} {project.pageCount === 1 ? "Step" : "Steps"}
+                      {project.isReactProject
+                        ? `${project.fileCount} Files`
+                        : `${project.pageCount} ${project.pageCount === 1 ? "Step" : "Steps"}`
+                      }
                     </span>
                   </td>
                   <td className="px-3 py-4 text-center">

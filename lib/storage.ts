@@ -1,6 +1,16 @@
 import fs from "fs/promises";
 import path from "path";
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Validate that an ID is a valid UUID to prevent path traversal attacks.
+ * All funnel IDs are generated via uuidv4(), so this rejects any crafted input.
+ */
+export function isValidFunnelId(id: string): boolean {
+  return UUID_REGEX.test(id);
+}
+
 export interface FunnelPage {
   title: string;
   slug: string;
@@ -63,13 +73,40 @@ async function ensureDataDir() {
   await fs.mkdir(DATA_DIR, { recursive: true });
 }
 
+/**
+ * Simple in-memory lock to prevent concurrent writes to the same funnel.
+ * Prevents lost-update race conditions when two chat edits arrive simultaneously.
+ */
+const writeLocks = new Map<string, Promise<void>>();
+
 export async function saveFunnel(funnel: Funnel): Promise<void> {
   await ensureDataDir();
   const filePath = path.join(DATA_DIR, `${funnel.id}.json`);
-  await fs.writeFile(filePath, JSON.stringify(funnel, null, 2));
+
+  // Wait for any existing write to this funnel to finish
+  const existingLock = writeLocks.get(funnel.id);
+  if (existingLock) {
+    await existingLock.catch(() => {}); // don't fail if the previous write errored
+  }
+
+  // Create and register a new lock for this write
+  const writePromise = fs.writeFile(filePath, JSON.stringify(funnel, null, 2));
+  writeLocks.set(funnel.id, writePromise);
+
+  try {
+    await writePromise;
+  } finally {
+    // Clean up lock if it's still ours
+    if (writeLocks.get(funnel.id) === writePromise) {
+      writeLocks.delete(funnel.id);
+    }
+  }
 }
 
 export async function getFunnel(id: string): Promise<Funnel | null> {
+  if (!isValidFunnelId(id)) {
+    return null;
+  }
   const filePath = path.join(DATA_DIR, `${id}.json`);
   try {
     const data = await fs.readFile(filePath, "utf-8");
@@ -78,7 +115,13 @@ export async function getFunnel(id: string): Promise<Funnel | null> {
       funnel.chatHistory = [];
     }
     return funnel;
-  } catch {
+  } catch (err: unknown) {
+    // File not found — normal case
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    // JSON parse error or other issue — log and return null
+    console.error(`[storage] Error reading funnel ${id}:`, err);
     return null;
   }
 }

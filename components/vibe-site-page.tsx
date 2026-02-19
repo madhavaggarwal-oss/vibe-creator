@@ -4,21 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { MODELS } from "./model-data";
 import { processImageFiles, type PendingImage } from "@/lib/image-utils";
+import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
 import ImageUpload from "./image-upload";
-
-interface FunnelProject {
-  id: string;
-  name: string;
-  prompt: string;
-  model: string;
-  pageCount: number;
-  fileCount: number;
-  isReactProject: boolean;
-  firstPageTitle: string;
-  createdAt: string;
-  previewSlug: string;
-  hasSnapshot: boolean;
-}
 
 export default function VibeSitePage() {
   const router = useRouter();
@@ -33,7 +20,6 @@ export default function VibeSitePage() {
 
   // Clone from URL state
   const [cloneUrl, setCloneUrl] = useState("");
-  const [scraping] = useState(false);
 
   // Delete state
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
@@ -49,8 +35,8 @@ export default function VibeSitePage() {
           const data = await res.json();
           setProjects(data);
         }
-      } catch {
-        // silent fail
+      } catch (err) {
+        console.error("[loadProjects] Failed to fetch projects:", err);
       } finally {
         setLoadingProjects(false);
       }
@@ -84,7 +70,7 @@ export default function VibeSitePage() {
 
   const handleCloneUrl = () => {
     const url = cloneUrl.trim();
-    if (!url || scraping) return;
+    if (!url) return;
 
     const fullUrl = url.startsWith("http") ? url : `https://${url}`;
     const clonePrompt = prompt.trim() || `Clone this website: ${url}`;
@@ -109,6 +95,7 @@ export default function VibeSitePage() {
   const handleGenerate = () => {
     const trimmed = prompt.trim();
     if (!trimmed || generating) return;
+    setError(null);
 
     const imageDataUrls = pendingImages
       .filter((img) => !img.loading && img.dataUrl)
@@ -132,20 +119,7 @@ export default function VibeSitePage() {
     window.location.href = "/generate/new";
   };
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffHours < 1) return "Just now";
-    if (diffHours < 24) return `Edited ${diffHours} hours ago`;
-    if (diffDays === 1) return "Edited yesterday";
-    if (diffDays < 30)
-      return `Edited ${diffDays} days ago`;
-    return `Edited ${date.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
-  };
+  const formatDate = formatRelativeDate;
 
   const handleDeleteProject = async () => {
     if (!deleteTarget || deleting) return;
@@ -156,9 +130,15 @@ export default function VibeSitePage() {
         setProjects((prev) => prev.filter((p) => p.id !== deleteTarget.id));
         setToast("Project deleted");
         setTimeout(() => setToast(null), 3000);
+      } else {
+        console.error("[handleDeleteProject] Delete failed with status:", res.status);
+        setToast("Failed to delete project");
+        setTimeout(() => setToast(null), 3000);
       }
-    } catch {
-      // silent fail
+    } catch (err) {
+      console.error("[handleDeleteProject] Delete request failed:", err);
+      setToast("Failed to delete project");
+      setTimeout(() => setToast(null), 3000);
     } finally {
       setDeleting(false);
       setDeleteTarget(null);
@@ -234,8 +214,7 @@ export default function VibeSitePage() {
                     value={cloneUrl}
                     onChange={(e) => setCloneUrl(e.target.value)}
                     placeholder="Paste a URL to clone a website..."
-                    disabled={scraping}
-                    className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none disabled:opacity-50"
+                    className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -247,25 +226,13 @@ export default function VibeSitePage() {
                 <button
                   type="button"
                   onClick={handleCloneUrl}
-                  disabled={!cloneUrl.trim() || scraping}
+                  disabled={!cloneUrl.trim()}
                   className="flex items-center gap-1.5 rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                 >
-                  {scraping ? (
-                    <>
-                      <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Scraping...
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h-.75A2.25 2.25 0 004.5 9.75v7.5a2.25 2.25 0 002.25 2.25h7.5a2.25 2.25 0 002.25-2.25v-7.5a2.25 2.25 0 00-2.25-2.25h-.75m0-3l-3-3m0 0l-3 3m3-3v11.25" />
-                      </svg>
-                      Clone
-                    </>
-                  )}
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h-.75A2.25 2.25 0 004.5 9.75v7.5a2.25 2.25 0 002.25 2.25h7.5a2.25 2.25 0 002.25-2.25v-7.5a2.25 2.25 0 00-2.25-2.25h-.75m0-3l-3-3m0 0l-3 3m3-3v11.25" />
+                  </svg>
+                  Clone
                 </button>
               </div>
               <textarea

@@ -3,20 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import HighLevelLayout from "@/components/highlevel-layout";
-
-interface FunnelProject {
-  id: string;
-  name: string;
-  prompt: string;
-  model: string;
-  pageCount: number;
-  fileCount: number;
-  isReactProject: boolean;
-  firstPageTitle: string;
-  createdAt: string;
-  previewSlug: string;
-  hasSnapshot: boolean;
-}
+import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
 
 const ITEMS_PER_PAGE = 24; // 6 rows x 4 cols
 
@@ -35,8 +22,8 @@ export default function ProjectsPage() {
           const data = await res.json();
           setProjects(data);
         }
-      } catch {
-        // silent fail
+      } catch (err) {
+        console.error("[loadProjects] Failed to fetch projects:", err);
       } finally {
         setLoading(false);
       }
@@ -58,19 +45,7 @@ export default function ProjectsPage() {
   const visibleProjects = filteredProjects.slice(0, visibleCount);
   const hasMore = visibleCount < filteredProjects.length;
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffHours < 1) return "Just now";
-    if (diffHours < 24) return `Edited ${diffHours} hours ago`;
-    if (diffDays === 1) return "Edited yesterday";
-    if (diffDays < 30) return `Edited ${diffDays} days ago`;
-    return `Edited ${date.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
-  };
+  const formatDate = formatRelativeDate;
 
   return (
     <HighLevelLayout activeTab="Vibe Creator" onTabChange={() => router.push("/")}>

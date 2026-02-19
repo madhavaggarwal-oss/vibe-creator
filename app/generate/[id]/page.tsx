@@ -12,6 +12,7 @@ import typescript from "highlight.js/lib/languages/typescript";
 import json from "highlight.js/lib/languages/json";
 import "highlight.js/styles/github-dark.css";
 import { processImageFiles, type PendingImage } from "@/lib/image-utils";
+import type { ChatMessage } from "@/lib/storage";
 import ImageUpload from "@/components/image-upload";
 
 hljs.registerLanguage("xml", xml);
@@ -38,13 +39,6 @@ interface CodeFile {
   path: string;
   content: string;
   size: number;
-}
-
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  timestamp: string;
-  images?: string[];
 }
 
 interface FunnelData {
@@ -214,9 +208,13 @@ export default function GenerateResultPage() {
   const [chatWidth, setChatWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const chatWidthRef = useRef(320);
-  const chatMinWidth = typeof window !== "undefined" ? Math.round(window.innerWidth * 0.2) : 256;
   const chatMaxWidth = 500;
   const chatDefaultWidth = 320;
+
+  // Compute chatMinWidth dynamically based on window width
+  const getChatMinWidth = useCallback(() => {
+    return typeof window !== "undefined" ? Math.max(256, Math.round(window.innerWidth * 0.2)) : 256;
+  }, []);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -246,7 +244,7 @@ export default function GenerateResultPage() {
     try {
       const saved = localStorage.getItem("vibe-chat-width");
       if (saved) {
-        const w = Math.max(chatMinWidth, Math.min(chatMaxWidth, Number(saved)));
+        const w = Math.max(getChatMinWidth(), Math.min(chatMaxWidth, Number(saved)));
         setChatWidth(w);
         chatWidthRef.current = w;
       }
@@ -314,7 +312,7 @@ export default function GenerateResultPage() {
     const onMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
       e.preventDefault();
-      const newWidth = Math.max(chatMinWidth, Math.min(chatMaxWidth, e.clientX));
+      const newWidth = Math.max(getChatMinWidth(), Math.min(chatMaxWidth, e.clientX));
       setChatWidth(newWidth);
       chatWidthRef.current = newWidth;
     };
@@ -383,6 +381,7 @@ export default function GenerateResultPage() {
 
   // Page route state (must be declared here with all other hooks)
   const [currentPage, setCurrentPage] = useState("/");
+  const [pageSelectorOpen, setPageSelectorOpen] = useState(false);
 
   const startGeneration = useCallback(
     async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>) => {
@@ -488,6 +487,8 @@ export default function GenerateResultPage() {
 
         if (scrapeUrl) {
           // Scrape first, then generate with scrape data
+          const controller = new AbortController();
+          generateAbortRef.current = controller;
           (async () => {
             setGeneratingState("generating");
             setGenerationStep(0);
@@ -509,6 +510,7 @@ export default function GenerateResultPage() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ url: scrapeUrl }),
+                signal: controller.signal,
               });
               const scrapeResult = await scrapeRes.json();
               if (!scrapeRes.ok) throw new Error(scrapeResult.error || "Failed to scrape URL");
@@ -528,6 +530,7 @@ export default function GenerateResultPage() {
                   images: scrapeImages,
                   scrapeData: scrapeResult,
                 }),
+                signal: controller.signal,
               });
               const genData = await genRes.json();
               if (!genRes.ok) throw new Error(genData.error || "Failed to generate");
@@ -560,6 +563,8 @@ export default function GenerateResultPage() {
                 setError(message);
                 setGeneratingState("error");
               }
+            } finally {
+              generateAbortRef.current = null;
             }
           })();
         } else {
@@ -823,7 +828,8 @@ export default function GenerateResultPage() {
     a.href = url;
     a.download = fileName;
     a.click();
-    URL.revokeObjectURL(url);
+    // Delay revocation to ensure the download has started
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleDownloadAll = async () => {
@@ -1156,30 +1162,44 @@ export default function GenerateResultPage() {
                   )}
                 </button>
 
-                {/* Page selector */}
-                <div className="relative">
-                  <select
-                    value={currentPage}
-                    onChange={(e) => { setCurrentPage(e.target.value); setRefreshKey((k) => k + 1); }}
-                    className="appearance-none bg-transparent text-sm text-gray-600 font-medium cursor-pointer outline-none pl-2 pr-5 py-0.5 hover:text-gray-900 transition-colors"
-                    style={{
-                      backgroundImage: pageRoutes.length > 1 ? `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' fill='%239CA3AF' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E")` : "none",
-                      backgroundRepeat: "no-repeat",
-                      backgroundPosition: "right 2px center",
-                    }}
+                {/* Page selector — dropdown always available, click area extends to fill bar */}
+                <div className="relative flex-1 flex items-center">
+                  <button
+                    onClick={() => setPageSelectorOpen((v) => !v)}
+                    className="flex items-center w-full h-full px-2 py-0.5 rounded-md text-sm text-gray-600 font-medium hover:text-gray-900 transition-colors cursor-pointer"
                   >
-                    {pageRoutes.length > 0 ? (
-                      pageRoutes.map((route) => (
-                        <option key={route.path} value={route.path}>{route.path || "/"}</option>
-                      ))
-                    ) : (
-                      <option value="/">/</option>
-                    )}
-                  </select>
+                    {currentPage || "/"}
+                  </button>
+                  {pageSelectorOpen && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setPageSelectorOpen(false)} />
+                      <div className="absolute left-0 right-0 top-full mt-1 z-30 min-w-[140px] rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                        {pageRoutes.map((route) => (
+                          <button
+                            key={route.path}
+                            onClick={() => {
+                              setCurrentPage(route.path);
+                              setRefreshKey((k) => k + 1);
+                              setPageSelectorOpen(false);
+                            }}
+                            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm transition-colors ${
+                              currentPage === route.path
+                                ? "text-blue-600 bg-blue-50 font-medium"
+                                : "text-gray-700 hover:bg-gray-50"
+                            }`}
+                          >
+                            <span>{route.path || "/"}</span>
+                            {currentPage === route.path && (
+                              <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                              </svg>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
-
-                {/* Spacer */}
-                <div className="flex-1" />
 
                 {/* Open in new tab */}
                 <button

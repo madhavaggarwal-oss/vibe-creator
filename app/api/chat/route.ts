@@ -41,7 +41,10 @@ export async function POST(request: NextRequest) {
     const modelId = model || funnel.model;
     const trimmedMessage = message.trim();
 
-    const imageList = Array.isArray(images) ? images.filter((i: unknown) => typeof i === "string") : [];
+    const MAX_IMAGES = 10;
+    const imageList = Array.isArray(images)
+      ? images.filter((i: unknown) => typeof i === "string").slice(0, MAX_IMAGES)
+      : [];
 
     // Pass abort signal so the Gemini call is cancelled when the client disconnects
     const result = await editFunnel(
@@ -63,17 +66,23 @@ export async function POST(request: NextRequest) {
 
     // Merge partial file updates into existing files
     const updatedFiles = { ...funnel.files! };
-    for (const [path, content] of Object.entries(result.files)) {
+    for (const [filePath, content] of Object.entries(result.files)) {
       if (content === null) {
-        delete updatedFiles[path];
+        delete updatedFiles[filePath];
       } else {
-        updatedFiles[path] = content;
+        updatedFiles[filePath] = content;
       }
     }
 
-    // Process image markers in changed files
-    const hasMarkers = Object.values(updatedFiles).some(
-      (v) => typeof v === "string" && /__IMG/.test(v)
+    // Process image markers in changed files.
+    // Also detect broken/placeholder image patterns that need fixing
+    // (empty src, /placeholder.svg, placeholder service URLs, etc.)
+    const needsImageProcessing = Object.values(updatedFiles).some(
+      (v) =>
+        typeof v === "string" &&
+        (/__IMG/.test(v) ||
+          /src\s*=\s*"(?:\/placeholder|\.?\/?assets\/|\.?\/?images?\/|https?:\/\/(?:via\.placeholder|placehold\.|picsum|placekitten))[^"]*"/i.test(v) ||
+          /src\s*=\s*""\s/i.test(v))
     );
 
     // Check again before expensive image processing
@@ -84,7 +93,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const finalFiles = hasMarkers
+    const finalFiles = needsImageProcessing
       ? await processImageMarkers(updatedFiles)
       : updatedFiles;
 
