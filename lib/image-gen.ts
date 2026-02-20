@@ -426,58 +426,58 @@ function fixBrokenImageSrcs(
   const result: Record<string, string> = {};
   let fixCount = 0;
 
-  // Match <img with src="..." and optionally alt="..."
-  // Handles both JSX (className=) and HTML (class=) style
-  const IMG_TAG_REGEX = /<img\s+[^>]*?src\s*=\s*(?:"([^"]*)"|'([^']*)'|\{["`]([^"`]*)["`]\})[^>]*?\/?>/gi;
-  const ALT_REGEX = /alt\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+  // Simple src extraction — avoids complex regex that can cause stack overflow on large files
+  const SRC_REGEX = /src\s*=\s*"([^"]*)"/i;
+  const ALT_REGEX = /alt\s*=\s*"([^"]*)"/i;
 
   for (const [filePath, content] of Object.entries(files)) {
-    if (typeof content !== "string") {
+    if (typeof content !== "string" || !/\.(tsx|jsx|html)$/.test(filePath)) {
       result[filePath] = content;
       continue;
     }
 
-    // Only process component/page files
-    if (!/\.(tsx|jsx|html)$/.test(filePath)) {
-      result[filePath] = content;
-      continue;
-    }
+    // Process line-by-line to avoid catastrophic regex backtracking
+    const lines = content.split("\n");
+    const fixedLines = lines.map((line) => {
+      if (!line.includes("<img") && !line.includes("src=")) return line;
 
-    result[filePath] = content.replace(IMG_TAG_REGEX, (fullTag, src1, src2, src3) => {
-      const src = (src1 ?? src2 ?? src3 ?? "").trim();
+      const srcMatch = line.match(SRC_REGEX);
+      if (!srcMatch) return line;
+      const src = srcMatch[1].trim();
 
       // Already valid — leave it alone
-      if (isValidImageSrc(src)) return fullTag;
+      if (isValidImageSrc(src)) return line;
+      // Not broken and looks like a real URL
+      if (!isBrokenSrc(src) && src.startsWith("http")) return line;
 
-      // Not a broken pattern we recognize — leave external URLs alone if they look real
-      if (!isBrokenSrc(src) && src.startsWith("http")) return fullTag;
-
-      // Skip if src is a JS expression (dynamic src like {variable})
-      if (!src1 && !src2 && !src3 && /src\s*=\s*\{/.test(fullTag)) return fullTag;
+      // Skip small icon-sized images — don't replace icons with AI-generated photos
+      // Detect by className having small fixed dimensions (h-4 to h-12, w-4 to w-12)
+      const clsMatch = line.match(/className="([^"]*)"/);
+      const cls = clsMatch ? clsMatch[1] : "";
+      const isSmallIcon = /\b[wh]-(?:[4-9]|1[0-2])\b/.test(cls) && !cls.includes("w-full");
+      if (isSmallIcon) {
+        // Remove the broken src entirely — leave a transparent placeholder
+        return line.replace(SRC_REGEX, 'src=""');
+      }
 
       // Extract alt text for the marker description
-      const altMatch = fullTag.match(ALT_REGEX);
-      const alt = (altMatch?.[1] ?? altMatch?.[2] ?? "").trim();
+      const altMatch = line.match(ALT_REGEX);
+      const alt = (altMatch?.[1] ?? "").trim();
 
-      // Build a descriptive marker from alt text or a generic description
       let description: string;
       if (alt && alt.length > 3 && !/^(image|photo|picture|img|placeholder)$/i.test(alt)) {
-        // Use alt text as the basis, but make it more descriptive for image generation
         description = `high quality professional photo of ${alt.toLowerCase()}, well-lit, detailed`;
       } else {
-        // Generic fallback based on file context
         const contextHint = filePath.replace(/.*\//, "").replace(/\.(tsx|jsx|html)$/, "");
         description = `high quality professional photo for ${contextHint.toLowerCase()} section, well-lit, modern setting`;
       }
 
       const marker = `__IMG:${description}__`;
       fixCount++;
-
-      // Replace only the src value within the tag
-      return fullTag
-        .replace(/src\s*=\s*(?:"[^"]*"|'[^']*'|\{["`][^"`]*["`]\})/, `src="${marker}"`)
-        .replace(/src\s*=\s*""/, `src="${marker}"`);
+      return line.replace(SRC_REGEX, `src="${marker}"`);
     });
+
+    result[filePath] = fixedLines.join("\n");
   }
 
   if (fixCount > 0) {
@@ -498,46 +498,48 @@ function ensureImageFitClasses(
   const result: Record<string, string> = {};
   let fixCount = 0;
 
-  const IMG_TAG_REGEX = /<img\s[^>]*?\/?>/gi;
   const REQUIRED_CLASSES = ["object-cover", "w-full", "h-full"];
 
   for (const [filePath, content] of Object.entries(files)) {
-    if (typeof content !== "string") {
+    if (typeof content !== "string" || !/\.(tsx|jsx|html)$/.test(filePath)) {
       result[filePath] = content;
       continue;
     }
 
-    if (!/\.(tsx|jsx|html)$/.test(filePath)) {
-      result[filePath] = content;
-      continue;
-    }
+    // Process line-by-line to avoid regex backtracking on large files
+    const lines = content.split("\n");
+    const fixedLines = lines.map((line) => {
+      if (!line.includes("<img")) return line;
 
-    result[filePath] = content.replace(IMG_TAG_REGEX, (fullTag) => {
-      // Skip SVG images or icons (tiny images like w-4, w-5, w-6, h-4, h-5, h-6)
-      if (/src\s*=\s*["']data:image\/svg/i.test(fullTag)) return fullTag;
+      // Extract className if present
+      const classMatch = line.match(/className="([^"]*)"/);
+      const cls = classMatch ? classMatch[1] : "";
 
-      // Extract existing className value
-      const classMatch = fullTag.match(/className\s*=\s*"([^"]*)"/);
+      // SKIP logos/icons — they have intentional fixed sizing
+      if (cls.includes("object-contain")) return line;
+      if (/\bh-\d+\b/.test(cls) && cls.includes("w-auto")) return line;
+      if (/\bw-\d+\b/.test(cls) && /\bh-\d+\b/.test(cls) && !cls.includes("w-full")) return line;
+
+      // For content images: ensure object-cover w-full h-full
       if (!classMatch) {
-        // No className at all — add one before the closing /> or >
-        const classes = REQUIRED_CLASSES.join(" ");
+        // No className at all — add one
         fixCount++;
-        return fullTag.replace(/\s*\/?>$/, ` className="${classes}" />`);
+        return line.replace(/<img\b/, `<img className="${REQUIRED_CLASSES.join(" ")}"`);
       }
 
-      const existing = classMatch[1];
-      const missing = REQUIRED_CLASSES.filter((cls) => !existing.includes(cls));
-
-      if (missing.length === 0) return fullTag; // All classes present
+      const missing = REQUIRED_CLASSES.filter((c) => !cls.includes(c));
+      if (missing.length === 0) return line;
 
       fixCount++;
-      const updated = (existing + " " + missing.join(" ")).trim();
-      return fullTag.replace(/className\s*=\s*"[^"]*"/, `className="${updated}"`);
+      const updated = (cls + " " + missing.join(" ")).trim();
+      return line.replace(`className="${cls}"`, `className="${updated}"`);
     });
+
+    result[filePath] = fixedLines.join("\n");
   }
 
   if (fixCount > 0) {
-    console.log(`[image-gen] Ensured object-cover w-full h-full on ${fixCount} <img> tags`);
+    console.log(`[image-gen] Ensured object-cover w-full h-full on ${fixCount} content <img> tags (skipped logos/icons)`);
   }
 
   return result;

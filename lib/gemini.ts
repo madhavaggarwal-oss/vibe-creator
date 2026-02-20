@@ -386,18 +386,26 @@ Example structure:
 
 1. VISUAL FIDELITY IS THE #1 PRIORITY
    - Match the screenshot EXACTLY: same layout, same spacing, same visual hierarchy
+   - ALL sections from the markdown content MUST be included — do NOT skip or omit any section
    - Every section in the screenshot must appear in the same order
    - Match column counts, card layouts, grid patterns precisely
    - Match border-radius values, shadows, and visual effects
    - Match the overall color scheme, dark/light section alternation
    - Match element sizes (button padding, card heights, hero sizes)
 
-2. EXACT COLORS
+2. EXACT COLORS & BACKGROUNDS
    - Use the exact hex colors provided in the branding data
-   - Apply using Tailwind arbitrary values: bg-[#1a2b3c], text-[#ff6600], border-[#hex]
-   - Match gradient directions and color stops from the screenshot
+   - CRITICAL: ALWAYS use Tailwind arbitrary values for colors: bg-[#1a2b3c], text-[#ff6600], border-[#hex]
+   - NEVER use custom color names like bg-primary, text-accent — these will NOT render. Always use bg-[#hex] format
+   - NEVER define custom colors in tailwind.config.ts — only use arbitrary value syntax
    - Match background colors for every section (header, hero, features, footer, etc.)
    - Match text colors (headings, body, muted, links)
+   - Match CTA/button colors exactly: background, text, border, and hover states
+   - Reproduce background gradients EXACTLY: same direction (to-r, to-br, to-b), same color stops, same positions
+   - Match card/section background colors precisely — frosted glass, dark cards, tinted overlays
+   - If the hero has a gradient overlay on an image, recreate the same gradient
+   - Background opacity values must match (bg-black/50, bg-white/10, etc.)
+   - Match dark-to-light or dark-to-warm transition sections with exact gradient colors
 
 3. EXACT FONTS
    - Use the exact font families from the branding data
@@ -418,21 +426,27 @@ Example structure:
 5. IMAGES — USE ORIGINAL SOURCE IMAGES (CRITICAL)
    You are provided with a list of SOURCE IMAGE URLs extracted from the original website. You MUST use these actual URLs to achieve pixel-perfect cloning.
 
-   RULES:
+   CONTENT IMAGES (hero banners, photos, screenshots, backgrounds):
    - Use the EXACT source image URLs provided in the "Source Image URLs" section below
-   - Match each image in the screenshot to the closest URL from the source list by analyzing the context (hero images, team photos, product shots, etc.)
-   - Place source URLs directly in src attributes: <img src="https://example.com/image.jpg" alt="..." className="object-cover w-full h-full" />
-   - ALWAYS wrap images in a container with EXPLICIT Tailwind sizing: aspect-video, aspect-square, aspect-[W/H], h-N, or w-N h-N
-   - Example: <div className="w-full aspect-video rounded-2xl overflow-hidden"><img src="https://cdn.example.com/hero.jpg" alt="Hero" className="object-cover w-full h-full" /></div>
-   - For avatars: <div className="w-12 h-12 rounded-full overflow-hidden"><img src="https://cdn.example.com/avatar.jpg" className="object-cover w-full h-full" /></div>
+   - Match each image in the screenshot to the closest URL from the source list
+   - ALWAYS wrap in a sized container: <div className="w-full aspect-video overflow-hidden"><img src="URL" className="object-cover w-full h-full" /></div>
+   - For avatars: <div className="w-12 h-12 rounded-full overflow-hidden"><img src="URL" className="object-cover w-full h-full" /></div>
+
+   LOGOS (brand logos, partner logos, navbar logos) — NEVER STRETCH:
+   - Constrain with FIXED height and auto width: className="h-8 w-auto object-contain"
+   - Do NOT use w-full or h-full on logos — this stretches them to fill the container
+   - Navbar logo example: <img src="URL" alt="Logo" className="h-8 w-auto object-contain" />
+   - Partner/client logos: <img src="URL" className="h-6 w-auto object-contain grayscale" />
+
+   ICONS — FIXED SIZE, NEVER OVERSIZED:
+   - Use inline SVGs with explicit small dimensions: width="20" height="20" or w-5 h-5
+   - Do NOT use w-full or h-full on icons
+   - Social icons: w-5 h-5. UI icons: w-4 h-4 or w-5 h-5. Never larger than w-6 h-6
 
    FALLBACK (only when no matching source URL exists):
-   - If an image is visible in the screenshot but no matching URL is in the source list, use __IMG:description__ markers
-   - FORMAT: <img src="__IMG:vivid 15-30 word description matching what's visible in the screenshot__" alt="..." className="object-cover w-full h-full" />
+   - Use __IMG:description__ markers: <img src="__IMG:vivid 15-30 word description__" className="object-cover w-full h-full" />
 
    NEVER use empty src="", /placeholder.svg, or external placeholder URLs (via.placeholder.com, picsum, placehold.co)
-   - For logos: use styled text with the brand name in the correct font/color (NOT images)
-   - For icons: use inline SVGs that approximate the icon's shape and color (NOT images)
 
 6. LAYOUT PRECISION
    - Use the HTML structure as reference for element nesting and hierarchy
@@ -458,7 +472,7 @@ REQUIRED CONFIG FILES:
 - /package.json — with react, react-dom, react-router-dom dependencies
 - /index.html — Include Google Font <link> tags matching the original site's fonts
 - /vite.config.ts — Standard React Vite config
-- /tailwind.config.ts — Minimal: content paths only, NO custom theme extensions
+- /tailwind.config.ts — Minimal: content paths ONLY. NO theme.extend (no custom colors, fonts, or spacing). Use arbitrary values instead: bg-[#hex], text-[#hex]
 - /tsconfig.json — Standard config
 
 SOURCE FILES:
@@ -782,6 +796,107 @@ function repairBraces(files: Record<string, string>): Record<string, string> {
 }
 
 /**
+ * Replace custom Tailwind color names (bg-primary, text-accent, etc.) with
+ * arbitrary hex values. Tailwind CDN in Sandpack cannot read tailwind.config,
+ * so custom colors like "primary" render as nothing.
+ */
+function resolveCustomColors(files: Record<string, string>): Record<string, string> {
+  // Extract custom colors from tailwind.config if present
+  const configFile = files["/tailwind.config.ts"] || files["/tailwind.config.js"] || "";
+  if (!configFile) return files;
+
+  // Parse color definitions: primary: '#FF6333', accent: "#0A0A0A", etc.
+  const colorMap: Record<string, string> = {};
+  const colorRegex = /['"]?(\w+)['"]?\s*:\s*['"]#([0-9a-fA-F]{3,8})['"]/g;
+  let match;
+  // Only look inside theme.extend.colors section
+  const colorsSection = configFile.match(/colors\s*:\s*\{([^}]+)\}/);
+  if (!colorsSection) return files;
+
+  while ((match = colorRegex.exec(colorsSection[1])) !== null) {
+    colorMap[match[1]] = match[2];
+  }
+
+  if (Object.keys(colorMap).length === 0) return files;
+  console.log(`[resolveCustomColors] Found custom colors:`, colorMap);
+
+  const result: Record<string, string> = {};
+  // Tailwind utility prefixes that take colors
+  const prefixes = ["bg", "text", "border", "ring", "from", "to", "via", "outline", "decoration", "accent", "fill", "stroke", "divide", "placeholder"];
+
+  for (const [path, content] of Object.entries(files)) {
+    if (!path.endsWith(".tsx") && !path.endsWith(".jsx")) {
+      result[path] = content;
+      continue;
+    }
+    let fixed = content;
+    for (const [name, hex] of Object.entries(colorMap)) {
+      for (const prefix of prefixes) {
+        // bg-primary → bg-[#FF6333], bg-primary/90 → bg-[#FF6333]/90
+        const pattern = new RegExp(`\\b${prefix}-${name}\\b(\\/\\d+)?`, "g");
+        fixed = fixed.replace(pattern, (m, opacity) => {
+          return `${prefix}-[#${hex}]${opacity || ""}`;
+        });
+      }
+    }
+    result[path] = fixed;
+  }
+
+  // Also clean up the tailwind config to remove custom colors
+  if (result["/tailwind.config.ts"]) {
+    result["/tailwind.config.ts"] = result["/tailwind.config.ts"].replace(/colors\s*:\s*\{[^}]+\},?\n?/g, "");
+  }
+  if (result["/tailwind.config.js"]) {
+    result["/tailwind.config.js"] = result["/tailwind.config.js"].replace(/colors\s*:\s*\{[^}]+\},?\n?/g, "");
+  }
+
+  return result;
+}
+
+/**
+ * Fix conflicting className on <img> tags.
+ * Gemini tends to append "object-cover w-full h-full" to ALL images,
+ * even logos/icons that already have fixed sizing (h-8 w-auto object-contain).
+ * This strips the conflicting trailing classes when a fixed-size pattern is present.
+ */
+function fixImageClassNames(files: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [path, content] of Object.entries(files)) {
+    if (!path.endsWith(".tsx") && !path.endsWith(".jsx")) {
+      result[path] = content;
+      continue;
+    }
+    // Simple line-by-line approach to avoid regex backtracking on large files
+    const lines = content.split("\n");
+    const fixedLines = lines.map((line) => {
+      if (!line.includes("<img") || !line.includes("className=")) return line;
+      // Find className="..." on this line and fix conflicting classes
+      return line.replace(/className="([^"]*)"/g, (match, cls: string) => {
+        // Only fix img-related classNames (must contain object- or w-full/h-full)
+        if (!cls.includes("object-") && !cls.includes("w-full")) return match;
+        let fixed = cls;
+        // If has object-contain AND object-cover, remove object-cover
+        if (fixed.includes("object-contain") && fixed.includes("object-cover")) {
+          fixed = fixed.replace(/\bobject-cover\b/g, "").replace(/\s{2,}/g, " ").trim();
+        }
+        // If has fixed height (h-N not h-full) and w-auto, remove w-full and h-full
+        if (/\bh-\d/.test(fixed) && fixed.includes("w-auto")) {
+          fixed = fixed.replace(/\bw-full\b/g, "").replace(/\bh-full\b/g, "").replace(/\s{2,}/g, " ").trim();
+        }
+        // If has fixed w-N h-N pair, remove w-full and h-full
+        if (/\bw-\d+\s/.test(fixed) && /\bh-\d+\s/.test(fixed) && fixed.includes("w-full")) {
+          fixed = fixed.replace(/\bw-full\b/g, "").replace(/\bh-full\b/g, "").replace(/\s{2,}/g, " ").trim();
+        }
+        if (fixed === cls) return match;
+        return `className="${fixed}"`;
+      });
+    });
+    result[path] = fixedLines.join("\n");
+  }
+  return result;
+}
+
+/**
  * Parse JSON from AI output. Tries in order:
  * 1. Direct JSON.parse
  * 2. jsonrepair library
@@ -799,11 +914,14 @@ function parseAIJson(text: string): unknown {
     // continue
   }
 
-  // 2. Try jsonrepair
+  // 2. Try jsonrepair (can throw RangeError on very large strings)
   try {
     const repaired = jsonrepair(cleaned);
     return JSON.parse(repaired);
-  } catch {
+  } catch (e) {
+    if (e instanceof RangeError) {
+      console.warn(`[parseAIJson] jsonrepair hit stack limit on ${cleaned.length} char input — skipping to manual extraction`);
+    }
     // continue
   }
 
@@ -918,7 +1036,9 @@ export async function editFunnel(
       codeFiles[k] = v;
     }
   }
-  const repairedFiles = await validateAndRepairFiles(codeFiles);
+  const fixedFiles = fixImageClassNames(codeFiles);
+  const resolvedFiles = resolveCustomColors(fixedFiles);
+  const repairedFiles = await validateAndRepairFiles(resolvedFiles);
 
   return { message, files: { ...repairedFiles, ...otherFiles } };
 }
@@ -1025,7 +1145,9 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
     console.warn(`[generateFunnel] Gemini finish reason: ${finishReason} (output may be truncated)`);
   }
   const text = response.text();
+  const usage = response.usageMetadata;
   console.log(`[generateFunnel] Response length: ${text.length} chars, finish reason: ${finishReason}`);
+  console.log(`[generateFunnel] Tokens — input: ${usage?.promptTokenCount}, output: ${usage?.candidatesTokenCount}, total: ${usage?.totalTokenCount}`);
 
   langfuseGen?.end({
     output: text,
@@ -1036,7 +1158,9 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
     },
     metadata: { finishReason, responseLength: text.length },
   });
+  console.log("[generateFunnel] Parsing AI response...", text.length, "chars");
   const parsed = parseAIJson(text) as Record<string, unknown>;
+  console.log("[generateFunnel] Parsed successfully");
 
   if (!parsed.files || typeof parsed.files !== "object") {
     throw new Error("Invalid response from AI: expected { files: {...} }");
@@ -1050,6 +1174,7 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
       files[path] = content;
     }
   }
+  console.log("[generateFunnel] Filtered files:", Object.keys(files).length);
 
   // Validate that essential files exist
   const essentialFiles = ["/src/App.tsx", "/src/main.tsx", "/package.json"];
@@ -1065,9 +1190,24 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
   }
 
   // Process image markers: generate AI images and replace markers with URLs
+  console.log("[generateFunnel] Processing image markers...");
   const filesWithImages = await processImageMarkers(files);
+  console.log("[generateFunnel] Image markers done");
+
+  // Fix conflicting image classNames (Gemini appends "object-cover w-full h-full" to everything)
+  console.log("[generateFunnel] Fixing image classNames...");
+  const fixedFiles = fixImageClassNames(filesWithImages);
+  console.log("[generateFunnel] Image classNames fixed");
+
+  // Resolve custom Tailwind colors (bg-primary → bg-[#hex]) since CDN can't read config
+  console.log("[generateFunnel] Resolving custom colors...");
+  const resolvedFiles = resolveCustomColors(fixedFiles);
+  console.log("[generateFunnel] Custom colors resolved");
 
   // Comprehensive syntax validation and repair (handles unterminated strings,
   // template literals, block comments, and unbalanced brackets)
-  return await validateAndRepairFiles(filesWithImages);
+  console.log("[generateFunnel] Running syntax repair...");
+  const repairedFiles = await validateAndRepairFiles(resolvedFiles);
+  console.log("[generateFunnel] Syntax repair done");
+  return repairedFiles;
 }
