@@ -109,42 +109,6 @@ SPACING & LAYOUT THAT BREATHES:
 - Cards should have p-8 or p-10 internal padding
 - Section headings need mb-16 to mb-20 before content grids
 
-LAYOUT VARIETY — CRITICAL (DO NOT BE REPETITIVE):
-Every generation MUST feel unique. Do NOT default to the same "text-left + image-right" split layout every time.
-
-HERO SECTION — Pick a DIFFERENT layout each time (rotate randomly, never repeat the same pattern):
-1. CENTERED HERO: Full-width centered text, large headline, subtitle, CTA buttons centered below, with a full-width image/gradient below the text block
-2. FULL-BLEED IMAGE HERO: Full-viewport image background with text overlay, dark gradient overlay for readability, centered or bottom-aligned text
-3. SPLIT HERO (text left, image right): Classic 2-column — but vary which side has text vs image
-4. SPLIT HERO REVERSED (image left, text right): Mirror of the above for variety
-5. STACKED HERO: Large headline on top spanning full width, then a row of 3 images or cards below it
-6. VIDEO/MEDIA-CENTRIC: Small text at top, massive media element (image with play button overlay) dominating the section
-7. EDITORIAL HERO: Asymmetric layout with overlapping elements — text partially overlapping a large image, offset grid
-8. MINIMAL TEXT HERO: Just a bold headline + single CTA, no image, powerful typography and subtle animated background (gradients, orbs, particles)
-9. DASHBOARD PREVIEW HERO: Text on one side with a mockup/screenshot-style card showing a product interface preview
-10. ZIGZAG HERO: Text and multiple smaller images arranged in a dynamic, non-grid pattern
-
-SECTION LAYOUTS — Mix these throughout the page (never use the same layout for consecutive sections):
-- Bento grid: asymmetric cards with varying sizes (col-span-2, row-span-2), mixed content types
-- Alternating zigzag: image-left/text-right then text-left/image-right for consecutive feature blocks
-- Full-width showcase: single large image or card spanning the entire width
-- Masonry-style: cards of varying heights in a Pinterest-like layout
-- Horizontal scroll section: cards in a horizontally scrollable container on mobile, grid on desktop
-- Stats with visual flair: large numbers with animated counters, colorful accent backgrounds or icon backgrounds
-- Testimonial carousel or marquee: not just a grid of cards
-- Timeline layout: for "how it works" or process sections, use a vertical timeline with alternating sides
-- Offset grid: elements deliberately misaligned for visual interest (translate-y offsets on alternating items)
-
-CTA VARIETY — Do NOT always use the same button pattern:
-- Gradient buttons with glow: shadow-[0_0_20px_rgba(accent)] on hover
-- Outlined/ghost buttons with fill on hover
-- Pill-shaped vs rounded-xl vs sharp corners — vary per site personality
-- Icon-leading or icon-trailing buttons
-- Magnetic/floating CTAs with subtle scale animations
-- Full-width CTA sections with contrasting background color
-- CTA with input field (email capture) side by side
-- Stacked CTAs: primary on top, text link below ("No credit card required")
-
 MODERN UI PATTERNS:
 - Bento grid layouts: asymmetric grids with varying card sizes (col-span-2, row-span-2)
 - Floating/overlapping elements that break the grid
@@ -154,8 +118,6 @@ MODERN UI PATTERNS:
 - Testimonials with large quotation marks, avatar, and subtle card background
 - Pricing cards with a highlighted "popular" tier using ring-2 ring-accent and scale-105
 - FAQ sections with smooth expand/collapse using React state and transition classes
-- Card hover effects: lift (translate-y), glow border, background color shift, image zoom
-- Decorative elements: floating orbs, grid patterns, dot patterns, noise textures via CSS
 
 BUTTONS & INTERACTIVE ELEMENTS:
 - Primary CTA: gradient background (bg-gradient-to-r from-blue-500 to-blue-600) with hover brightness/scale, rounded-xl, px-8 py-4

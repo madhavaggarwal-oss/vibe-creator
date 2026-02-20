@@ -18,9 +18,6 @@ export default function VibeSitePage() {
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Clone from URL state
-  const [cloneUrl, setCloneUrl] = useState("");
-
   // Delete state
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FunnelProject | null>(null);
@@ -68,31 +65,7 @@ export default function VibeSitePage() {
     });
   };
 
-  const handleCloneUrl = () => {
-    const url = cloneUrl.trim();
-    if (!url) return;
-
-    const fullUrl = url.startsWith("http") ? url : `https://${url}`;
-    const clonePrompt = prompt.trim() || `Clone this website: ${url}`;
-
-    try {
-      sessionStorage.setItem(
-        "vibe-pending-generation",
-        JSON.stringify({
-          prompt: clonePrompt,
-          model,
-          images: [],
-          scrapeUrl: fullUrl,
-        })
-      );
-    } catch {
-      // sessionStorage might fail
-    }
-
-    window.location.href = "/generate/new";
-  };
-
-  const handleGenerate = () => {
+  const handleSubmit = () => {
     const trimmed = prompt.trim();
     if (!trimmed || generating) return;
     setError(null);
@@ -101,21 +74,39 @@ export default function VibeSitePage() {
       .filter((img) => !img.loading && img.dataUrl)
       .map((img) => img.dataUrl);
 
-    // Store prompt data synchronously, then navigate to the builder
+    // Check if prompt contains a URL → clone pipeline, otherwise → generate
+    // Matches https://... OR bare domains like example.com, foo.bar.com/path
+    const httpMatch = trimmed.match(/https?:\/\/[^\s]+/i);
+    const bareMatch = !httpMatch ? trimmed.match(/(?:^|\s)([\w-]+\.[\w.-]+\.[a-z]{2,}(?:\/\S*)?|[\w-]+\.[a-z]{2,}(?:\/\S*)?)/i) : null;
+    const hasUrl = !!(httpMatch || bareMatch);
+
     try {
-      sessionStorage.setItem(
-        "vibe-pending-generation",
-        JSON.stringify({
-          prompt: trimmed,
-          model,
-          images: imageDataUrls,
-        })
-      );
+      if (hasUrl) {
+        const extractedUrl = httpMatch ? httpMatch[0] : bareMatch![1];
+        const fullUrl = extractedUrl.startsWith("http") ? extractedUrl : `https://${extractedUrl}`;
+        sessionStorage.setItem(
+          "vibe-pending-generation",
+          JSON.stringify({
+            prompt: trimmed,
+            model,
+            images: [],
+            scrapeUrl: fullUrl,
+          })
+        );
+      } else {
+        sessionStorage.setItem(
+          "vibe-pending-generation",
+          JSON.stringify({
+            prompt: trimmed,
+            model,
+            images: imageDataUrls,
+          })
+        );
+      }
     } catch {
       // sessionStorage might fail in some contexts
     }
 
-    // Use window.location for reliable navigation (avoids client-side routing quirks)
     window.location.href = "/generate/new";
   };
 
@@ -203,49 +194,17 @@ export default function VibeSitePage() {
           {/* Prompt Input Card */}
           <div className="w-full max-w-[640px]">
             <div className="rounded-2xl bg-white/80 backdrop-blur-md border border-gray-200/80 shadow-lg shadow-black/5 overflow-hidden">
-              {/* Clone from URL input */}
-              <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-                <div className="flex flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5">
-                  <svg className="h-4 w-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-                  </svg>
-                  <input
-                    type="text"
-                    value={cloneUrl}
-                    onChange={(e) => setCloneUrl(e.target.value)}
-                    placeholder="Paste a URL to clone a website..."
-                    className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleCloneUrl();
-                      }
-                    }}
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCloneUrl}
-                  disabled={!cloneUrl.trim()}
-                  className="flex items-center gap-1.5 rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h-.75A2.25 2.25 0 004.5 9.75v7.5a2.25 2.25 0 002.25 2.25h7.5a2.25 2.25 0 002.25-2.25v-7.5a2.25 2.25 0 00-2.25-2.25h-.75m0-3l-3-3m0 0l-3 3m3-3v11.25" />
-                  </svg>
-                  Clone
-                </button>
-              </div>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe the site you want to create..."
+                placeholder="Describe a site to create, or paste a URL to clone..."
                 rows={3}
                 disabled={generating}
                 className="w-full resize-none border-0 bg-transparent px-5 pt-4 pb-2 text-[15px] text-gray-800 placeholder-gray-400 outline-none disabled:opacity-50"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    handleGenerate();
+                    handleSubmit();
                   }
                 }}
               />
@@ -310,7 +269,7 @@ export default function VibeSitePage() {
 
                   {/* Submit button */}
                   <button
-                    onClick={handleGenerate}
+                    onClick={handleSubmit}
                     disabled={generating || !prompt.trim()}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-r from-[#FEC403] via-[#2896FB] to-[#4BCF29] text-white shadow-sm transition-all hover:shadow-md hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-sm"
                   >
