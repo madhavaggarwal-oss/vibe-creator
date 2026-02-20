@@ -24,6 +24,14 @@ export interface ChatMessage {
   images?: string[];
 }
 
+export interface PendingImageEntry {
+  placeholder: string;   // placehold.co URL currently in files
+  markerFull: string;     // Original "__IMG:description__" string
+  description: string;    // Full description (not truncated)
+  width: number;
+  height: number;
+}
+
 export interface Funnel {
   id: string;
   name?: string;
@@ -33,6 +41,7 @@ export interface Funnel {
   model: string;
   pages: FunnelPage[];
   files?: Record<string, string>;
+  pendingImages?: PendingImageEntry[];
   chatHistory: ChatMessage[];
   preGenHistory?: ChatMessage[];
   createdAt: string;

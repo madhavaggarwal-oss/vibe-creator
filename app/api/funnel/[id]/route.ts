@@ -22,6 +22,7 @@ export async function GET(
       promptImages: funnel.promptImages || [],
       model: funnel.model,
       files: funnel.files,
+      pendingImages: funnel.pendingImages || [],
       chatHistory: funnel.chatHistory || [],
       preGenHistory: funnel.preGenHistory || [],
       createdAt: funnel.createdAt,

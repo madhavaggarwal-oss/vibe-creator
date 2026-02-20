@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { put } from "@vercel/blob";
 import sharp from "sharp";
+import type { PendingImageEntry } from "./storage";
 
 interface ImageMarker {
   full: string; // e.g. __IMG:a sunset over mountains__
@@ -208,20 +209,20 @@ export function extractImageMarkers(
 }
 
 /**
- * Resize and compress an image buffer to JPEG using sharp.
- * Uses "attention" strategy to smart-crop around faces/points of interest.
+ * Compress an image buffer to JPEG using sharp.
+ * Does NOT crop — just caps the longest edge at 1200px and compresses.
+ * The browser's CSS object-cover handles display-time fitting, which is
+ * more accurate because it knows the actual rendered container size.
  */
 async function compressImage(
   buffer: Buffer,
-  width: number,
-  height: number
 ): Promise<Buffer> {
   return sharp(buffer)
-    .resize(width, height, {
-      fit: "cover",
-      position: sharp.strategy.attention,
+    .resize(1200, 1200, {
+      fit: "inside",
+      withoutEnlargement: true,
     })
-    .jpeg({ quality: 75 })
+    .jpeg({ quality: 80 })
     .toBuffer();
 }
 
@@ -297,7 +298,7 @@ async function generateAndUploadImages(
       if (!data) throw new Error("Empty image data");
 
       const rawBuffer = Buffer.from(data, "base64");
-      const compressed = await compressImage(rawBuffer, marker.width, marker.height);
+      const compressed = await compressImage(rawBuffer);
       const filename = `generated/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 
       const blob = await put(filename, compressed, {
@@ -487,7 +488,156 @@ function fixBrokenImageSrcs(
 }
 
 /**
- * Orchestrator: fix broken srcs → normalize legacy markers → extract markers → generate images → replace markers.
+ * Ensure all <img> tags in TSX/JSX/HTML files have object-cover w-full h-full classes
+ * so images always fill their containers without being cut off or leaving gaps.
+ * This is a code-level enforcement — LLMs sometimes omit these classes.
+ */
+function ensureImageFitClasses(
+  files: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  let fixCount = 0;
+
+  const IMG_TAG_REGEX = /<img\s[^>]*?\/?>/gi;
+  const REQUIRED_CLASSES = ["object-cover", "w-full", "h-full"];
+
+  for (const [filePath, content] of Object.entries(files)) {
+    if (typeof content !== "string") {
+      result[filePath] = content;
+      continue;
+    }
+
+    if (!/\.(tsx|jsx|html)$/.test(filePath)) {
+      result[filePath] = content;
+      continue;
+    }
+
+    result[filePath] = content.replace(IMG_TAG_REGEX, (fullTag) => {
+      // Skip SVG images or icons (tiny images like w-4, w-5, w-6, h-4, h-5, h-6)
+      if (/src\s*=\s*["']data:image\/svg/i.test(fullTag)) return fullTag;
+
+      // Extract existing className value
+      const classMatch = fullTag.match(/className\s*=\s*"([^"]*)"/);
+      if (!classMatch) {
+        // No className at all — add one before the closing /> or >
+        const classes = REQUIRED_CLASSES.join(" ");
+        fixCount++;
+        return fullTag.replace(/\s*\/?>$/, ` className="${classes}" />`);
+      }
+
+      const existing = classMatch[1];
+      const missing = REQUIRED_CLASSES.filter((cls) => !existing.includes(cls));
+
+      if (missing.length === 0) return fullTag; // All classes present
+
+      fixCount++;
+      const updated = (existing + " " + missing.join(" ")).trim();
+      return fullTag.replace(/className\s*=\s*"[^"]*"/, `className="${updated}"`);
+    });
+  }
+
+  if (fixCount > 0) {
+    console.log(`[image-gen] Ensured object-cover w-full h-full on ${fixCount} <img> tags`);
+  }
+
+  return result;
+}
+
+/**
+ * Phase 1: Replace image markers with placehold.co placeholders (fast, no AI generation).
+ * Returns the updated files and metadata about pending images for Phase 2.
+ */
+export function replaceMarkersWithPlaceholders(
+  files: Record<string, string>
+): { files: Record<string, string>; pendingImages: PendingImageEntry[] } {
+  // Layer 1: Convert broken/placeholder image src values into __IMG: markers
+  const fixed = fixBrokenImageSrcs(files);
+
+  // Layer 2: Normalize legacy __IMG[N:N]:desc__ → __IMG:desc__
+  const normalized = normalizeLegacyMarkers(fixed);
+
+  const markers = extractImageMarkers(normalized);
+
+  if (markers.length === 0) {
+    return { files: ensureImageFitClasses(normalized), pendingImages: [] };
+  }
+
+  // Build placeholder URLs and pending image entries
+  const pendingImages: PendingImageEntry[] = [];
+  const urlMap = new Map<string, string>();
+
+  for (const marker of markers) {
+    const shortDesc = (marker.description || "Image").trim().slice(0, 30);
+    const placeholder = `https://placehold.co/${marker.width}x${marker.height}/e2e8f0/64748b?text=${encodeURIComponent(shortDesc)}`;
+    urlMap.set(marker.full, placeholder);
+
+    pendingImages.push({
+      placeholder,
+      markerFull: marker.full,
+      description: marker.description,
+      width: marker.width,
+      height: marker.height,
+    });
+  }
+
+  // Replace markers with placeholders
+  const withPlaceholders = replaceImageMarkers(normalized, urlMap, markers);
+
+  // Ensure fit classes
+  const finalFiles = ensureImageFitClasses(withPlaceholders);
+
+  console.log(`[image-gen] Phase 1: replaced ${markers.length} markers with placeholders`);
+
+  return { files: finalFiles, pendingImages };
+}
+
+/**
+ * Phase 2: Generate AI images for pending placeholders and replace them in files.
+ * Returns updated files and count of failures.
+ */
+export async function generateImagesForFiles(
+  files: Record<string, string>,
+  pendingImages: PendingImageEntry[]
+): Promise<{ files: Record<string, string>; failedCount: number }> {
+  if (pendingImages.length === 0) {
+    return { files, failedCount: 0 };
+  }
+
+  // Convert PendingImageEntry[] to ImageMarker[] for the existing generation pipeline
+  const markers: ImageMarker[] = pendingImages.map((entry) => ({
+    full: entry.markerFull,
+    description: entry.description,
+    width: entry.width,
+    height: entry.height,
+  }));
+
+  console.log(`[image-gen] Phase 2: generating ${markers.length} AI images...`);
+  const urlMap = await generateAndUploadImages(markers);
+  console.log(`[image-gen] Phase 2: generated ${urlMap.size}/${markers.length} images`);
+
+  // Replace placehold.co URLs with real blob URLs in file contents
+  let updatedFiles = { ...files };
+  let failedCount = 0;
+
+  for (const entry of pendingImages) {
+    const blobUrl = urlMap.get(entry.markerFull);
+    if (blobUrl) {
+      // Replace placeholder URL with real blob URL in all files
+      for (const [filePath, content] of Object.entries(updatedFiles)) {
+        if (typeof content === "string" && content.includes(entry.placeholder)) {
+          updatedFiles[filePath] = content.split(entry.placeholder).join(blobUrl);
+        }
+      }
+    } else {
+      failedCount++;
+    }
+  }
+
+  return { files: updatedFiles, failedCount };
+}
+
+/**
+ * Orchestrator: fix broken srcs → normalize legacy markers → extract markers → generate images → replace markers → ensure fit classes.
  * No-ops if no markers found or BLOB_READ_WRITE_TOKEN is missing.
  */
 export async function processImageMarkers(
@@ -500,16 +650,23 @@ export async function processImageMarkers(
   const normalized = normalizeLegacyMarkers(fixed);
 
   const markers = extractImageMarkers(normalized);
-  if (markers.length === 0) return normalized;
+  if (markers.length === 0) {
+    // Still ensure fit classes even when no markers
+    return ensureImageFitClasses(normalized);
+  }
 
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     console.warn("[image-gen] BLOB_READ_WRITE_TOKEN not set, using fallbacks");
-    return replaceImageMarkers(normalized, new Map(), markers);
+    const withFallbacks = replaceImageMarkers(normalized, new Map(), markers);
+    return ensureImageFitClasses(withFallbacks);
   }
 
   console.log(`[image-gen] Processing ${markers.length} image markers...`);
   const urlMap = await generateAndUploadImages(markers);
   console.log(`[image-gen] Generated ${urlMap.size}/${markers.length} images`);
 
-  return replaceImageMarkers(normalized, urlMap, markers);
+  const withImages = replaceImageMarkers(normalized, urlMap, markers);
+
+  // Final pass: ensure all <img> tags have object-cover w-full h-full
+  return ensureImageFitClasses(withImages);
 }
