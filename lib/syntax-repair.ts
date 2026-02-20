@@ -332,6 +332,122 @@ ${code}`;
 }
 
 // ---------------------------------------------------------------------------
+// Tier 0 — Fix bare hex-like tokens (e.g. MongoDB ObjectIds without quotes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Gemini sometimes emits bare hex identifiers like `691736397635bd8559f7f96f`
+ * (e.g. in arrays or JSX attributes) instead of wrapping them in quotes.
+ * JS cannot parse these — "Identifier directly after number".
+ *
+ * This uses a state machine to only replace tokens in code mode,
+ * leaving strings, template literals, and comments untouched.
+ */
+function repairBareHexTokens(code: string): string {
+  // Quick bail: check if any candidate pattern exists
+  if (!/[0-9][0-9a-fA-F]{11,}/.test(code)) return code;
+
+  // Regex for a bare hex-like token: starts with digit, contains at least one
+  // letter (a-f), and is 12+ chars total — clearly not a valid JS number.
+  const hexTokenRe = /\b([0-9][0-9a-fA-F]*[a-fA-F][0-9a-fA-F]*)\b/g;
+  const isHexId = (m: string) => m.length >= 12 && /[a-fA-F]/.test(m);
+
+  // Walk the code, tracking mode to isolate code-only regions
+  let mode: Mode = "code";
+  let escaped = false;
+  let braceDepth = 0;
+  const tplStack: number[] = [];
+
+  // Collect [start, end) ranges that are in code mode
+  const codeRanges: [number, number][] = [];
+  let rangeStart = 0;
+
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i];
+    const next = i + 1 < code.length ? code[i + 1] : "";
+
+    if (escaped) { escaped = false; continue; }
+
+    const prev = mode;
+
+    if (mode === "line-comment") {
+      if (ch === "\n") mode = "code";
+    } else if (mode === "block-comment") {
+      if (ch === "*" && next === "/") { mode = "code"; i++; }
+    } else if (mode === "string-single") {
+      if (ch === "\\") escaped = true;
+      else if (ch === "'" || ch === "\n") mode = "code";
+    } else if (mode === "string-double") {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"' || ch === "\n") mode = "code";
+    } else if (mode === "template") {
+      if (ch === "\\") escaped = true;
+      else if (ch === "`") mode = "code";
+      else if (ch === "$" && next === "{") {
+        tplStack.push(braceDepth);
+        braceDepth++;
+        mode = "code";
+        i++;
+      }
+    } else {
+      // code mode
+      if (ch === "/" && next === "/") { mode = "line-comment"; i++; }
+      else if (ch === "/" && next === "*") { mode = "block-comment"; i++; }
+      else if (ch === "'") mode = "string-single";
+      else if (ch === '"') mode = "string-double";
+      else if (ch === "`") mode = "template";
+      else if (ch === "{") braceDepth++;
+      else if (ch === "}") {
+        if (tplStack.length > 0 && braceDepth - 1 === tplStack[tplStack.length - 1]) {
+          tplStack.pop();
+          braceDepth--;
+          mode = "template";
+        } else {
+          braceDepth--;
+        }
+      }
+    }
+
+    // Track transitions between code and non-code
+    if (prev === "code" && mode !== "code") {
+      codeRanges.push([rangeStart, i]);
+      rangeStart = i;
+    } else if (prev !== "code" && mode === "code") {
+      rangeStart = i;
+    }
+  }
+  // Flush final segment
+  if (mode === "code") {
+    codeRanges.push([rangeStart, code.length]);
+  }
+
+  // Build a set of replacement spans [matchStart, matchEnd, replacement]
+  const replacements: [number, number, string][] = [];
+  for (const [start, end] of codeRanges) {
+    const segment = code.slice(start, end);
+    let m: RegExpExecArray | null;
+    hexTokenRe.lastIndex = 0;
+    while ((m = hexTokenRe.exec(segment)) !== null) {
+      if (isHexId(m[1])) {
+        replacements.push([start + m.index, start + m.index + m[0].length, `"${m[1]}"`]);
+      }
+    }
+  }
+
+  if (replacements.length === 0) return code;
+
+  console.warn(`[syntax-repair] repairBareHexTokens: quoting ${replacements.length} bare hex token(s)`);
+
+  // Apply replacements in reverse order so indices stay valid
+  let result = code;
+  for (let i = replacements.length - 1; i >= 0; i--) {
+    const [s, e, rep] = replacements[i];
+    result = result.slice(0, s) + rep + result.slice(e);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -361,9 +477,12 @@ export async function validateAndRepairFiles(
       continue;
     }
 
-    const issues = analyzeSyntax(content);
+    // Tier 0: fix bare hex tokens before syntax analysis
+    const preFixed = repairBareHexTokens(content);
+
+    const issues = analyzeSyntax(preFixed);
     if (issues.length === 0) {
-      result[path] = content;
+      result[path] = preFixed;
       continue;
     }
 
@@ -372,7 +491,7 @@ export async function validateAndRepairFiles(
     );
 
     // Tier 1: local repair
-    const { code: repaired, remainingIssues } = attemptLocalRepair(content);
+    const { code: repaired, remainingIssues } = attemptLocalRepair(preFixed);
 
     if (remainingIssues.length === 0) {
       console.warn(`[syntax-repair] ${path}: local repair fixed all issues`);
