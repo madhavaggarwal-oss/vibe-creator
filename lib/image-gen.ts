@@ -16,7 +16,7 @@ const MARKER_REGEX = /__IMG:([^_]+(?:_(?!_)[^_]*)*)__/g;
 /** Legacy format: __IMG[16:9]:description__ */
 const LEGACY_MARKER_REGEX = /__IMG\[\d+:\d+\]:([^_]+(?:_(?!_)[^_]*)*)__/g;
 
-const MAX_IMAGES = 12;
+const MAX_IMAGES = Infinity;
 const MIN_DIMENSION = 128; // Never generate images smaller than this
 
 /** Tailwind spacing scale → pixels */
@@ -488,6 +488,122 @@ function fixBrokenImageSrcs(
 }
 
 /**
+ * Ensure every content <img> tag's immediate parent div has overflow-hidden
+ * and explicit sizing classes. This prevents images from bleeding out of
+ * containers (especially with hover:scale) and ensures parseDimsFromContext
+ * can detect proper dimensions instead of defaulting to 800×600.
+ */
+function ensureImageContainers(
+  files: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  let fixCount = 0;
+
+  for (const [filePath, content] of Object.entries(files)) {
+    if (typeof content !== "string" || !/\.(tsx|jsx|html)$/.test(filePath)) {
+      result[filePath] = content;
+      continue;
+    }
+
+    let modified = content;
+    const imgRegex = /<img\b/g;
+    let imgMatch: RegExpExecArray | null;
+    const replacements: Array<{ oldStr: string; newStr: string }> = [];
+
+    while ((imgMatch = imgRegex.exec(modified)) !== null) {
+      const imgIdx = imgMatch.index;
+
+      // Extract the full <img ... > or <img ... /> tag
+      const imgTagEnd = modified.indexOf(">", imgIdx);
+      if (imgTagEnd === -1) continue;
+      const imgTag = modified.substring(imgIdx, imgTagEnd + 1);
+
+      // Extract img className
+      const imgClsMatch = imgTag.match(/className="([^"]*)"/);
+      const imgCls = imgClsMatch ? imgClsMatch[1] : "";
+
+      // Skip logos/icons (same heuristics as ensureImageFitClasses)
+      if (imgCls.includes("object-contain")) continue;
+      if (/\bh-\d+\b/.test(imgCls) && imgCls.includes("w-auto")) continue;
+      if (/\bw-\d+\b/.test(imgCls) && /\bh-\d+\b/.test(imgCls) && !imgCls.includes("w-full")) continue;
+
+      // Look backward up to 500 chars for parent div
+      const searchStart = Math.max(0, imgIdx - 500);
+      const before = modified.substring(searchStart, imgIdx);
+
+      // Find all <div className="..."> in the preceding text
+      const divRegex = /<div\s[^>]*?className="([^"]*)"[^>]*>/g;
+      const divMatches: RegExpExecArray[] = [];
+      let dm: RegExpExecArray | null;
+      while ((dm = divRegex.exec(before)) !== null) divMatches.push(dm);
+      if (divMatches.length === 0) continue;
+
+      // Find the nearest open parent div by checking div balance
+      let parentCls: string | null = null;
+      let fullDivTag: string | null = null;
+
+      for (let i = divMatches.length - 1; i >= 0; i--) {
+        const dm = divMatches[i];
+        const textAfterDiv = before.substring(dm.index! + dm[0].length);
+        const opens = (textAfterDiv.match(/<div[\s>]/g) || []).length;
+        const closes = (textAfterDiv.match(/<\/div>/g) || []).length;
+        // This div is still open at the img position if closes <= opens
+        if (closes <= opens) {
+          parentCls = dm[1];
+          fullDivTag = dm[0];
+          break;
+        }
+      }
+
+      if (!parentCls || !fullDivTag) continue;
+
+      // Check what's already present
+      const hasOverflowHidden = parentCls.includes("overflow-hidden");
+      const hasSizing =
+        /\baspect-/.test(parentCls) ||
+        /\bh-\[/.test(parentCls) ||
+        /\bh-\d+\b/.test(parentCls) ||
+        /\b(?:min-)?h-(?:screen|full|dvh|svh|lvh)\b/.test(parentCls) ||
+        /\binset-/.test(parentCls);
+
+      if (hasOverflowHidden && hasSizing) continue;
+
+      // Build updated className
+      let newCls = parentCls;
+      if (!hasOverflowHidden) newCls = (newCls + " overflow-hidden").trim();
+      if (!hasSizing) newCls = (newCls + " w-full aspect-video").trim();
+
+      if (newCls !== parentCls) {
+        const newDivTag = fullDivTag.replace(
+          `className="${parentCls}"`,
+          `className="${newCls}"`
+        );
+        replacements.push({ oldStr: fullDivTag, newStr: newDivTag });
+        fixCount++;
+      }
+    }
+
+    // Apply deduplicated replacements
+    const applied = new Set<string>();
+    for (const { oldStr, newStr } of replacements) {
+      if (applied.has(oldStr)) continue;
+      applied.add(oldStr);
+      modified = modified.split(oldStr).join(newStr);
+    }
+
+    result[filePath] = modified;
+  }
+
+  if (fixCount > 0) {
+    console.log(
+      `[image-gen] ensureImageContainers: fixed ${fixCount} image wrapper divs (added overflow-hidden/sizing)`
+    );
+  }
+
+  return result;
+}
+
+/**
  * Ensure all <img> tags in TSX/JSX/HTML files have object-cover w-full h-full classes
  * so images always fill their containers without being cut off or leaving gaps.
  * This is a code-level enforcement — LLMs sometimes omit these classes.
@@ -558,10 +674,13 @@ export function replaceMarkersWithPlaceholders(
   // Layer 2: Normalize legacy __IMG[N:N]:desc__ → __IMG:desc__
   const normalized = normalizeLegacyMarkers(fixed);
 
-  const markers = extractImageMarkers(normalized);
+  // Layer 3: Ensure image wrapper divs have overflow-hidden and sizing
+  const withContainers = ensureImageContainers(normalized);
+
+  const markers = extractImageMarkers(withContainers);
 
   if (markers.length === 0) {
-    return { files: ensureImageFitClasses(normalized), pendingImages: [] };
+    return { files: ensureImageFitClasses(withContainers), pendingImages: [] };
   }
 
   // Build placeholder URLs and pending image entries
@@ -583,7 +702,7 @@ export function replaceMarkersWithPlaceholders(
   }
 
   // Replace markers with placeholders
-  const withPlaceholders = replaceImageMarkers(normalized, urlMap, markers);
+  const withPlaceholders = replaceImageMarkers(withContainers, urlMap, markers);
 
   // Ensure fit classes
   const finalFiles = ensureImageFitClasses(withPlaceholders);
@@ -651,15 +770,18 @@ export async function processImageMarkers(
   // Layer 2: Normalize legacy __IMG[N:N]:desc__ → __IMG:desc__
   const normalized = normalizeLegacyMarkers(fixed);
 
-  const markers = extractImageMarkers(normalized);
+  // Layer 3: Ensure image wrapper divs have overflow-hidden and sizing
+  const withContainers = ensureImageContainers(normalized);
+
+  const markers = extractImageMarkers(withContainers);
   if (markers.length === 0) {
     // Still ensure fit classes even when no markers
-    return ensureImageFitClasses(normalized);
+    return ensureImageFitClasses(withContainers);
   }
 
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     console.warn("[image-gen] BLOB_READ_WRITE_TOKEN not set, using fallbacks");
-    const withFallbacks = replaceImageMarkers(normalized, new Map(), markers);
+    const withFallbacks = replaceImageMarkers(withContainers, new Map(), markers);
     return ensureImageFitClasses(withFallbacks);
   }
 
@@ -667,7 +789,7 @@ export async function processImageMarkers(
   const urlMap = await generateAndUploadImages(markers);
   console.log(`[image-gen] Generated ${urlMap.size}/${markers.length} images`);
 
-  const withImages = replaceImageMarkers(normalized, urlMap, markers);
+  const withImages = replaceImageMarkers(withContainers, urlMap, markers);
 
   // Final pass: ensure all <img> tags have object-cover w-full h-full
   return ensureImageFitClasses(withImages);

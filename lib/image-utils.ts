@@ -10,9 +10,10 @@ export interface PendingImage {
 }
 
 const MAX_DIMENSION = 1024;
+const CLONE_MAX_DIMENSION = 2048;
 const JPEG_QUALITY = 0.8;
 
-function resizeImage(file: File): Promise<string> {
+function resizeImage(file: File, maxDimension: number = MAX_DIMENSION): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -22,13 +23,13 @@ function resizeImage(file: File): Promise<string> {
 
       let { width, height } = img;
 
-      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+      if (width > maxDimension || height > maxDimension) {
         if (width > height) {
-          height = Math.round((height * MAX_DIMENSION) / width);
-          width = MAX_DIMENSION;
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
         } else {
-          width = Math.round((width * MAX_DIMENSION) / height);
-          height = MAX_DIMENSION;
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
         }
       }
 
@@ -69,6 +70,20 @@ export async function processImageFiles(
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
     const dataUrl = await resizeImage(file);
+    results.push({ dataUrl, name: file.name });
+  }
+
+  return results;
+}
+
+export async function processCloneImageFiles(
+  files: FileList
+): Promise<ProcessedImage[]> {
+  const results: ProcessedImage[] = [];
+
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith("image/")) continue;
+    const dataUrl = await resizeImage(file, CLONE_MAX_DIMENSION);
     results.push({ dataUrl, name: file.name });
   }
 

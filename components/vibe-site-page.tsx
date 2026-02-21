@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { MODELS } from "./model-data";
-import { processImageFiles, type PendingImage } from "@/lib/image-utils";
+import { processImageFiles, processCloneImageFiles, type PendingImage } from "@/lib/image-utils";
 import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
 import ImageUpload from "./image-upload";
 
@@ -52,7 +52,8 @@ export default function VibeSitePage() {
     const startIdx = pendingImages.length;
     setPendingImages((prev) => [...prev, ...placeholders]);
 
-    const processed = await processImageFiles(files);
+    // Use higher resolution for clone images (processed at 2048px vs 1024px)
+    const processed = await processCloneImageFiles(files);
     setPendingImages((prev) => {
       const updated = [...prev];
       processed.forEach((img, i) => {
@@ -65,14 +66,16 @@ export default function VibeSitePage() {
     });
   };
 
+  const MAX_CLONE_IMAGES = 5;
+
   const handleSubmit = () => {
     const trimmed = prompt.trim();
-    if (!trimmed || generating) return;
-    setError(null);
-
     const imageDataUrls = pendingImages
       .filter((img) => !img.loading && img.dataUrl)
       .map((img) => img.dataUrl);
+
+    if ((!trimmed && imageDataUrls.length === 0) || generating) return;
+    setError(null);
 
     // Check if prompt contains a URL → clone pipeline, otherwise → generate
     // Matches https://... OR bare domains like example.com, foo.bar.com/path
@@ -80,10 +83,19 @@ export default function VibeSitePage() {
     const bareMatch = !httpMatch ? trimmed.match(/(?:^|\s)([\w-]+\.[\w.-]+\.[a-z]{2,}(?:\/\S*)?|[\w-]+\.[a-z]{2,}(?:\/\S*)?)/i) : null;
     const hasUrl = !!(httpMatch || bareMatch);
 
+    // Clone-intent keywords for image-based cloning
+    const cloneIntentRegex = /\b(clone|replicate|copy|recreate|replica|make this exact|same as this|build this exact)\b/i;
+    const hasImages = imageDataUrls.length > 0;
+    const isImageClone = !hasUrl && hasImages && (!trimmed || cloneIntentRegex.test(trimmed));
+
+    console.log(`[handleSubmit] Pipeline routing — hasUrl: ${hasUrl}, hasImages: ${hasImages} (${imageDataUrls.length}), isImageClone: ${isImageClone}, prompt: "${trimmed.slice(0, 80)}"`);
+
     try {
       if (hasUrl) {
+        // Tier 1: URL detected → existing scrape+clone pipeline
         const extractedUrl = httpMatch ? httpMatch[0] : bareMatch![1];
         const fullUrl = extractedUrl.startsWith("http") ? extractedUrl : `https://${extractedUrl}`;
+        console.log(`[handleSubmit] → Pipeline: URL_CLONE | Sub: scrape+generate | URL: ${fullUrl}`);
         sessionStorage.setItem(
           "vibe-pending-generation",
           JSON.stringify({
@@ -93,7 +105,23 @@ export default function VibeSitePage() {
             scrapeUrl: fullUrl,
           })
         );
+      } else if (isImageClone) {
+        // Tier 2: Images + (no text OR clone-intent keywords) → image clone pipeline
+        console.log(`[handleSubmit] → Pipeline: IMAGE_CLONE | Sub: direct generate | Images: ${imageDataUrls.length}, hasText: ${!!trimmed}`);
+        const cloneImages = imageDataUrls.slice(0, MAX_CLONE_IMAGES);
+        const clonePrompt = trimmed || "Clone this website exactly as shown in the screenshots.";
+        sessionStorage.setItem(
+          "vibe-pending-generation",
+          JSON.stringify({
+            prompt: clonePrompt,
+            model,
+            images: cloneImages,
+            isImageClone: true,
+          })
+        );
       } else {
+        // Tier 3: Normal generation
+        console.log(`[handleSubmit] → Pipeline: NORMAL_GENERATION | Sub: ${imageDataUrls.length > 0 ? 'with reference images' : 'text only'}`);
         sessionStorage.setItem(
           "vibe-pending-generation",
           JSON.stringify({
@@ -270,7 +298,7 @@ export default function VibeSitePage() {
                   {/* Submit button */}
                   <button
                     onClick={handleSubmit}
-                    disabled={generating || !prompt.trim()}
+                    disabled={generating || (!prompt.trim() && pendingImages.filter(img => !img.loading && img.dataUrl).length === 0)}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-r from-[#FEC403] via-[#2896FB] to-[#4BCF29] text-white shadow-sm transition-all hover:shadow-md hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-sm"
                   >
                     {generating ? (

@@ -80,6 +80,18 @@ const GENERATION_STEPS = [
   { label: "Finalizing your project", icon: "check", duration: 5000 },
 ];
 
+const IMAGE_CLONE_STEPS = [
+  { label: "Analyzing screenshots", icon: "scan", duration: 3000 },
+  { label: "Extracting colors & fonts", icon: "palette", duration: 4000 },
+  { label: "Mapping layout structure", icon: "layout", duration: 5000 },
+  { label: "Building React components", icon: "code", duration: 5000 },
+  { label: "Recreating visual design", icon: "responsive", duration: 6000 },
+  { label: "Matching pixel-perfect details", icon: "sparkle", duration: 4000 },
+  { label: "Setting up routing", icon: "nav", duration: 3000 },
+  { label: "Generating images", icon: "link", duration: 3000 },
+  { label: "Finalizing clone", icon: "check", duration: 5000 },
+];
+
 const SIMULATED_CODE_FILES = [
   { path: "/index.html", name: "index.html", code: `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8" />\n  <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n  <title>Project</title>\n</head>\n<body>\n  <div id="root"></div>\n  <script type="module" src="/src/index.tsx"></script>\n</body>\n</html>` },
   { path: "/src/index.tsx", name: "index.tsx", code: `import React from "react";\nimport ReactDOM from "react-dom/client";\nimport { HashRouter } from "react-router-dom";\nimport App from "./App";\nimport "./index.css";\n\nReactDOM.createRoot(\n  document.getElementById("root")!\n).render(\n  <React.StrictMode>\n    <HashRouter>\n      <App />\n    </HashRouter>\n  </React.StrictMode>\n);` },
@@ -227,6 +239,7 @@ export default function GenerateResultPage() {
   const [chatPendingImages, setChatPendingImages] = useState<PendingImage[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
   const [pendingPromptImages, setPendingPromptImages] = useState<string[]>([]);
+  const [isImageCloneMode, setIsImageCloneMode] = useState(false);
 
   // Code view state (view-only)
   const [viewMode, setViewMode] = useState<"preview" | "code">("preview");
@@ -384,15 +397,19 @@ export default function GenerateResultPage() {
   const [pageSelectorOpen, setPageSelectorOpen] = useState(false);
 
   const startGeneration = useCallback(
-    async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>) => {
+    async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>, isImageClone?: boolean) => {
       setGeneratingState("generating");
       setGenerationStep(0);
       setGenerationProgress(0);
+      setIsImageCloneMode(!!isImageClone);
+
+      // Select appropriate steps based on mode
+      const steps = isImageClone ? IMAGE_CLONE_STEPS : GENERATION_STEPS;
 
       // Animate steps
       let step = 0;
       stepTimerRef.current = setInterval(() => {
-        step = (step + 1) % GENERATION_STEPS.length;
+        step = (step + 1) % steps.length;
         setGenerationStep(step);
       }, 3500);
 
@@ -411,7 +428,7 @@ export default function GenerateResultPage() {
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, model, images, scrapeData }),
+          body: JSON.stringify({ prompt, model, images, scrapeData, isImageClone }),
           signal: controller.signal,
         });
 
@@ -476,7 +493,7 @@ export default function GenerateResultPage() {
       const stored = sessionStorage.getItem("vibe-pending-generation");
       if (stored) {
         sessionStorage.removeItem("vibe-pending-generation");
-        const { prompt, model, images, scrapeData, scrapeUrl } = JSON.parse(stored);
+        const { prompt, model, images, scrapeData, scrapeUrl, isImageClone } = JSON.parse(stored);
         setPendingPrompt(prompt);
         setPendingTimestamp(new Date().toISOString());
         setPendingModel(model);
@@ -567,6 +584,9 @@ export default function GenerateResultPage() {
               generateAbortRef.current = null;
             }
           })();
+        } else if (isImageClone) {
+          // Image clone: skip Firecrawl, generate directly with isImageClone flag
+          startGeneration(prompt, model, images, undefined, true);
         } else {
           startGeneration(prompt, model, images, scrapeData || undefined);
         }
@@ -1041,7 +1061,8 @@ export default function GenerateResultPage() {
   const isReady = generatingState === "idle" && funnel !== null;
 
   const selectedDevice = DEVICES.find((d) => d.id === device) || DEVICES[0];
-  const currentStep = GENERATION_STEPS[generationStep] || GENERATION_STEPS[0];
+  const activeSteps = isImageCloneMode ? IMAGE_CLONE_STEPS : GENERATION_STEPS;
+  const currentStep = activeSteps[generationStep] || activeSteps[0];
 
   const fileCount = projectFiles ? Object.keys(projectFiles).length : 0;
 

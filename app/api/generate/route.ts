@@ -6,7 +6,7 @@ import { saveFunnel, extractProjectName } from "@/lib/storage";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, model, images, scrapeData } = body;
+    const { prompt, model, images, scrapeData, isImageClone } = body;
 
     if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
       return NextResponse.json(
@@ -32,7 +32,8 @@ export async function POST(request: NextRequest) {
       modelId,
       imageList.length > 0 ? imageList : undefined,
       scrapeData || undefined,
-      request.signal
+      request.signal,
+      !!isImageClone
     );
 
     // Double-check: if client disconnected while Gemini was finishing, don't save
