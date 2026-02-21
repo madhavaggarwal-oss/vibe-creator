@@ -454,6 +454,191 @@ export default function ReactProjectPreview({
     window.parent.postMessage({ type: "html-snapshot", html: document.documentElement.outerHTML }, "*");
   }
 });`);
+
+    // GHL form submission interception: intercept all form submits and send data to parent
+    bridgeLines.push(`
+// Helper: find the semantic field name for an input element
+function __ghlFieldName(el) {
+  // 1. name attribute — primary signal (Gemini generates these with GHL-compatible names)
+  if (el.name) return el.name;
+
+  // 2. id attribute
+  if (el.id) return el.id;
+
+  // 3. Fallback for older projects: find associated label text
+  // Check <label for="id">
+  if (el.id) {
+    var labelFor = document.querySelector('label[for="' + el.id + '"]');
+    if (labelFor) {
+      var lt = labelFor.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      if (lt) return lt;
+    }
+  }
+  // Check parent <label>
+  var parentLabel = el.closest("label");
+  if (parentLabel) {
+    var txt = "";
+    for (var c = 0; c < parentLabel.childNodes.length; c++) {
+      if (parentLabel.childNodes[c].nodeType === 3) txt += parentLabel.childNodes[c].textContent;
+    }
+    txt = txt.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (txt) return txt;
+  }
+  // Check nearby label: walk up to 3 parent levels looking for a label sibling
+  var node = el;
+  for (var lvl = 0; lvl < 3; lvl++) {
+    var prev = node.previousElementSibling;
+    if (prev && (prev.tagName === "LABEL" || prev.tagName === "SPAN" || prev.tagName === "P")) {
+      var pt = prev.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      if (pt && pt.length < 30) return pt;
+    }
+    // Also check if the parent itself contains a label child before this element
+    var par = node.parentElement;
+    if (par) {
+      var lbl = par.querySelector("label, span.label, span[class*='label']");
+      if (lbl && lbl !== node) {
+        var lt2 = lbl.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+        if (lt2 && lt2.length < 30) return lt2;
+      }
+    }
+    node = node.parentElement;
+    if (!node) break;
+  }
+
+  // 4. Infer from input type
+  if (el.type === "email") return "email";
+  if (el.type === "tel") return "phone";
+  if (el.type === "url") return "website";
+
+  // 5. aria-label
+  var aria = el.getAttribute("aria-label");
+  if (aria) return aria.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
+  return "";
+}
+
+document.addEventListener("submit", function(e) {
+  try {
+    var form = e.target;
+    if (!form || form.tagName !== "FORM") return;
+    e.preventDefault();
+    console.log("[GHL] Form submit intercepted", form.id || "(no id)");
+
+    var fields = {};
+    var customFieldKeys = [];
+    var customFieldLabels = {};
+    var inputs = form.querySelectorAll("input, select, textarea");
+    for (var i = 0; i < inputs.length; i++) {
+      var el = inputs[i];
+      if (el.type === "file" || el.type === "submit" || el.type === "button" || el.type === "reset" || el.type === "hidden") continue;
+
+      var fieldName = __ghlFieldName(el);
+      if (!fieldName) continue;
+
+      // Detect explicitly marked custom fields and their display labels
+      if (el.getAttribute("data-ghl-custom") === "true") {
+        customFieldKeys.push(fieldName);
+        var label = el.getAttribute("data-ghl-label");
+        if (label) customFieldLabels[fieldName] = label;
+      }
+
+      console.log("[GHL] Field:", fieldName, (el.getAttribute("data-ghl-custom") === "true" ? "(custom)" : "(standard)"), "value=" + el.value);
+
+      var val;
+      if (el.type === "checkbox") { val = el.checked ? (el.value || "true") : ""; }
+      else if (el.type === "radio") { if (!el.checked) continue; val = el.value; }
+      else { val = el.value; }
+
+      if (fields[fieldName] !== undefined) {
+        if (Array.isArray(fields[fieldName])) { fields[fieldName].push(val); }
+        else { fields[fieldName] = [fields[fieldName], val]; }
+      } else {
+        fields[fieldName] = val;
+      }
+    }
+
+    // Combine country_code + phone into a single phone field with country code prefix
+    if (fields["country_code"] && fields["phone"]) {
+      var code = fields["country_code"].toString().trim();
+      var num = fields["phone"].toString().trim();
+      fields["phone"] = code + num;
+      delete fields["country_code"];
+      console.log("[GHL] Combined phone with country code:", fields["phone"]);
+    }
+
+    console.log("[GHL] Collected fields:", JSON.stringify(fields, null, 2));
+    if (customFieldKeys.length) console.log("[GHL] Custom field keys:", customFieldKeys);
+
+    // Send to parent with explicit custom field markers and labels
+    window.parent.postMessage({ type: "ghl-form-submit", fields: fields, customFieldKeys: customFieldKeys, customFieldLabels: customFieldLabels }, "*");
+
+    // Disable submit button — ONLY use attribute/style changes (never .textContent or .value)
+    // because modifying child nodes causes React to crash with "removeChild" errors
+    // when the AI-generated code navigates away (e.g. to a thank-you page) after submit
+    var submitBtn = form.querySelector('button[type="submit"], button:not([type]), input[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = "0.6";
+      submitBtn.style.pointerEvents = "none";
+    }
+  } catch(submitErr) {
+    console.error("[GHL] Form submit error:", submitErr);
+  }
+}, true);`);
+
+    // GHL form result listener: receive success/error from parent and show toast
+    bridgeLines.push(`window.addEventListener("message", (e) => {
+  try {
+    if (e.source !== window.parent) return;
+    if (!e.data || e.data.type !== "ghl-form-result") return;
+    console.log("[GHL] Form result received:", e.data.success ? "SUCCESS" : "FAILED", e.data.message);
+
+    // Restore all submit buttons — only attribute/style changes (safe for React DOM)
+    var forms = document.querySelectorAll("form");
+    for (var i = 0; i < forms.length; i++) {
+      var btn = forms[i].querySelector('button[type="submit"], button:not([type]), input[type="submit"]');
+      if (btn && btn.disabled) {
+        btn.disabled = false;
+        btn.style.opacity = "";
+        btn.style.pointerEvents = "";
+      }
+    }
+
+    // Show toast notification
+    var toastContainer = document.getElementById("__ghl-toast-container");
+    if (!toastContainer) {
+      toastContainer = document.createElement("div");
+      toastContainer.id = "__ghl-toast-container";
+      toastContainer.style.cssText = "position:fixed;top:0;left:0;width:100%;z-index:99999;pointer-events:none;";
+      document.body.appendChild(toastContainer);
+    }
+    var toast = document.createElement("div");
+    toast.style.cssText = "position:relative;top:20px;left:50%;transform:translateX(-50%);display:inline-block;padding:12px 24px;border-radius:8px;font-family:system-ui,sans-serif;font-size:14px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:opacity 0.3s;pointer-events:auto;text-align:center;";
+    if (e.data.success) {
+      toast.style.background = "#10b981";
+      toast.style.color = "white";
+      toast.textContent = e.data.message || "Form submitted successfully!";
+    } else {
+      toast.style.background = "#ef4444";
+      toast.style.color = "white";
+      toast.textContent = e.data.message || "Submission failed. Please try again.";
+    }
+    toastContainer.style.textAlign = "center";
+    toastContainer.appendChild(toast);
+    setTimeout(function() {
+      try { toast.style.opacity = "0"; } catch(ex) {}
+      setTimeout(function() { try { toast.parentNode && toast.parentNode.removeChild(toast); } catch(ex) {} }, 300);
+    }, 3000);
+
+    // Reset form on success
+    if (e.data.success) {
+      for (var j = 0; j < forms.length; j++) { forms[j].reset(); }
+    }
+  } catch(resultErr) {
+    console.error("[GHL] Form result handler error:", resultErr);
+  }
+});`);
+
     bridgeLines.push('export { default } from "./src/App";');
 
     sfFiles["/App.tsx"] = {

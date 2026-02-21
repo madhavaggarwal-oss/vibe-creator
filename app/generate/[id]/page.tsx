@@ -389,6 +389,52 @@ export default function GenerateResultPage() {
     }, 4000);
   }, []);
 
+  // GHL form submission handler — listens for form data from Sandpack iframe
+  useEffect(() => {
+    const handleGhlFormSubmit = async (e: MessageEvent) => {
+      if (!e.data || e.data.type !== "ghl-form-submit") return;
+
+      const { fields, customFieldKeys, customFieldLabels } = e.data;
+      if (!fields || Object.keys(fields).length === 0) return;
+
+      console.log("[GHL] Received form submission from iframe:", fields);
+      if (customFieldKeys?.length) console.log("[GHL] Custom field keys:", customFieldKeys);
+      if (customFieldLabels && Object.keys(customFieldLabels).length) console.log("[GHL] Custom field labels:", customFieldLabels);
+
+      const iframe = document.querySelector('.sp-preview-iframe') as HTMLIFrameElement;
+
+      try {
+        const res = await fetch("/api/ghl/contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields, customFieldKeys, customFieldLabels }),
+        });
+
+        let data: Record<string, unknown> = {};
+        try { data = await res.json(); } catch { /* non-JSON response */ }
+        console.log("[GHL] API response:", res.status, data);
+
+        iframe?.contentWindow?.postMessage({
+          type: "ghl-form-result",
+          success: res.ok,
+          message: res.ok
+            ? "Form submitted successfully!"
+            : (typeof data.error === "string" ? data.error : "Submission failed"),
+        }, "*");
+      } catch (err) {
+        console.error("[GHL] Network error:", err);
+        iframe?.contentWindow?.postMessage({
+          type: "ghl-form-result",
+          success: false,
+          message: "Network error. Please try again.",
+        }, "*");
+      }
+    };
+
+    window.addEventListener("message", handleGhlFormSubmit);
+    return () => window.removeEventListener("message", handleGhlFormSubmit);
+  }, []);
+
   // Project files for Sandpack preview
   const projectFiles = funnel?.files || null;
 

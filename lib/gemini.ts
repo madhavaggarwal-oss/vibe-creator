@@ -332,6 +332,55 @@ For stats sections with large numbers, create animated counters that count up wh
 Responsive Navbar: sticky top-0, backdrop-blur-xl, mobile hamburger with useState toggle.
 
 ═══════════════════════════════════════
+  FORMS — GHL CONTACT INTEGRATION
+═══════════════════════════════════════
+
+When generating forms (contact forms, lead capture, signup, consultation, booking, etc.), follow these rules for GoHighLevel CRM integration:
+
+1. Every <input>, <select>, and <textarea> MUST have a name attribute
+2. Use these EXACT GHL standard field names when the form field matches:
+   - firstName, lastName, name (full name), email, phone
+   - address1, city, state, postalCode, country
+   - website, dateOfBirth, gender, companyName, timezone
+3. For fields that do NOT match any GHL standard field above, use a descriptive snake_case name and add data-ghl-custom="true" with a data-ghl-label attribute containing the human-readable display name
+4. For gender fields, ALWAYS render as a <select> with exactly two options: Male and Female (display labels), with lowercase values "male" and "female"
+5. Do NOT generate file upload inputs (type="file") in forms — only text-based inputs are supported
+6. For <select> options, use natural human-readable text as option values (e.g., value="Renovation" not value="renovation" or value="full_renovation"), except for gender which uses lowercase
+7. Every form MUST include at least an email field, a phone field, or both. Never generate a form without at least one of these.
+8. When including a phone field, ALWAYS render it with a country code selector: a <select> for the country code placed next to the phone <input> in a flex row. Include at least 10-15 common country codes (US +1, UK +44, India +91, etc.). The phone input should use name="phone" and the country code select should use name="country_code". On submission the final phone value should combine them (e.g. "+1 8885551234"). Example:
+   <div className="flex gap-2">
+     <select name="country_code" className="w-24 ...">
+       <option value="+1">+1</option>
+       <option value="+44">+44</option>
+       <option value="+91">+91</option>
+       <option value="+61">+61</option>
+       <option value="+81">+81</option>
+       <option value="+49">+49</option>
+       <option value="+33">+33</option>
+       <option value="+86">+86</option>
+       <option value="+55">+55</option>
+       <option value="+971">+971</option>
+       <option value="+966">+966</option>
+       <option value="+65">+65</option>
+       <option value="+82">+82</option>
+       <option value="+39">+39</option>
+       <option value="+34">+34</option>
+     </select>
+     <input name="phone" type="tel" placeholder="888-888-8888" className="flex-1 ..." />
+   </div>
+
+Example form:
+  <input name="firstName" type="text" placeholder="Jane" />
+  <input name="email" type="email" placeholder="jane@example.com" />
+  <div className="flex gap-2">
+    <select name="country_code" className="w-24 ..."><option value="+1">+1</option><option value="+44">+44</option><option value="+91">+91</option></select>
+    <input name="phone" type="tel" placeholder="888-888-8888" className="flex-1 ..." />
+  </div>
+  <select name="gender"><option value="">Select Gender</option><option value="male">Male</option><option value="female">Female</option></select>
+  <select name="project_type" data-ghl-custom="true" data-ghl-label="Project Type"><option value="">Select</option><option value="Renovation">Renovation</option><option value="New Build">New Build</option></select>
+  <input name="budget" data-ghl-custom="true" data-ghl-label="Budget" placeholder="$50k" />
+
+═══════════════════════════════════════
   TECHNICAL REQUIREMENTS
 ═══════════════════════════════════════
 
@@ -507,6 +556,35 @@ Add ScrollToTop component:
     return null;
   }
 Place <ScrollToTop /> inside HashRouter, before <Routes>.
+
+═══════════════════════════════════════
+  FORMS — GHL CONTACT INTEGRATION
+═══════════════════════════════════════
+
+When generating or cloning forms (contact forms, lead capture, signup, consultation, booking, etc.), follow these rules for GoHighLevel CRM integration:
+
+1. Every <input>, <select>, and <textarea> MUST have a name attribute
+2. Use these EXACT GHL standard field names when the form field matches:
+   - firstName, lastName, name (full name), email, phone
+   - address1, city, state, postalCode, country
+   - website, dateOfBirth, gender, companyName, timezone
+3. For fields that do NOT match any GHL standard field above, use a descriptive snake_case name and add data-ghl-custom="true" with a data-ghl-label attribute containing the human-readable display name
+4. For gender fields, ALWAYS render as a <select> with exactly two options: Male and Female (display labels), with lowercase values "male" and "female"
+5. Do NOT generate file upload inputs (type="file") in forms — only text-based inputs are supported
+6. For <select> options, use natural human-readable text as option values (e.g., value="Renovation" not value="renovation" or value="full_renovation"), except for gender which uses lowercase
+7. Every form MUST include at least an email field, a phone field, or both. Never generate a form without at least one of these.
+8. When including a phone field, ALWAYS render it with a country code selector: a <select> for the country code placed next to the phone <input> in a flex row. Include at least 10-15 common country codes. The phone input should use name="phone" and the country code select should use name="country_code". On submission the final phone value should combine them.
+
+Example form:
+  <input name="firstName" type="text" placeholder="Jane" />
+  <input name="email" type="email" placeholder="jane@example.com" />
+  <div className="flex gap-2">
+    <select name="country_code" className="w-24 ..."><option value="+1">+1</option><option value="+44">+44</option><option value="+91">+91</option></select>
+    <input name="phone" type="tel" placeholder="888-888-8888" className="flex-1 ..." />
+  </div>
+  <select name="gender"><option value="">Select Gender</option><option value="male">Male</option><option value="female">Female</option></select>
+  <select name="project_type" data-ghl-custom="true" data-ghl-label="Project Type"><option value="">Select</option><option value="Renovation">Renovation</option><option value="New Build">New Build</option></select>
+  <input name="budget" data-ghl-custom="true" data-ghl-label="Budget" placeholder="$50k" />
 
 ═══════════════════════════════════════
   TECHNICAL REQUIREMENTS
@@ -749,6 +827,35 @@ Add ScrollToTop component:
 Place <ScrollToTop /> inside HashRouter, before <Routes>.
 
 ═══════════════════════════════════════
+  FORMS — GHL CONTACT INTEGRATION
+═══════════════════════════════════════
+
+When cloning forms visible in the screenshots (contact forms, lead capture, signup, consultation, booking, etc.), follow these rules for GoHighLevel CRM integration:
+
+1. Every <input>, <select>, and <textarea> MUST have a name attribute
+2. Use these EXACT GHL standard field names when the form field matches:
+   - firstName, lastName, name (full name), email, phone
+   - address1, city, state, postalCode, country
+   - website, dateOfBirth, gender, companyName, timezone
+3. For fields that do NOT match any GHL standard field above, use a descriptive snake_case name and add data-ghl-custom="true" with a data-ghl-label attribute containing the human-readable display name
+4. For gender fields, ALWAYS render as a <select> with exactly two options: Male and Female (display labels), with lowercase values "male" and "female"
+5. Do NOT generate file upload inputs (type="file") in forms — only text-based inputs are supported
+6. For <select> options, use natural human-readable text as option values (e.g., value="Renovation" not value="renovation" or value="full_renovation"), except for gender which uses lowercase
+7. Every form MUST include at least an email field, a phone field, or both. Never generate a form without at least one of these.
+8. When including a phone field, ALWAYS render it with a country code selector: a <select> for the country code placed next to the phone <input> in a flex row. Include at least 10-15 common country codes. The phone input should use name="phone" and the country code select should use name="country_code". On submission the final phone value should combine them.
+
+Example form:
+  <input name="firstName" type="text" placeholder="Jane" />
+  <input name="email" type="email" placeholder="jane@example.com" />
+  <div className="flex gap-2">
+    <select name="country_code" className="w-24 ..."><option value="+1">+1</option><option value="+44">+44</option><option value="+91">+91</option></select>
+    <input name="phone" type="tel" placeholder="888-888-8888" className="flex-1 ..." />
+  </div>
+  <select name="gender"><option value="">Select Gender</option><option value="male">Male</option><option value="female">Female</option></select>
+  <select name="project_type" data-ghl-custom="true" data-ghl-label="Project Type"><option value="">Select</option><option value="Renovation">Renovation</option><option value="New Build">New Build</option></select>
+  <input name="budget" data-ghl-custom="true" data-ghl-label="Budget" placeholder="$50k" />
+
+═══════════════════════════════════════
   TECHNICAL REQUIREMENTS
 ═══════════════════════════════════════
 
@@ -808,6 +915,16 @@ To delete a file, set its value to null: "/src/components/OldComponent.tsx": nul
     - Existing images with blob URLs (*.vercel-storage.com) should be left unchanged
     - Existing images with real external URLs (https://...) from cloned source sites should be left unchanged — do NOT replace them with markers
     - Markers are auto-replaced with AI-generated images after your response
+13. FORMS: When adding or editing forms (contact, lead capture, signup, consultation, booking, etc.), follow these rules for GoHighLevel CRM integration:
+    - Every <input>, <select>, and <textarea> MUST have a name attribute
+    - Use these EXACT GHL standard field names when the form field matches: firstName, lastName, name (full name), email, phone, address1, city, state, postalCode, country, website, dateOfBirth, gender, companyName, timezone
+    - For fields that do NOT match any GHL standard field, use a descriptive snake_case name and add data-ghl-custom="true" with a data-ghl-label attribute for the human-readable display name
+    - For <select> options, use natural human-readable text as option values (e.g., value="Renovation" not value="renovation"), except for gender which uses lowercase
+    - For gender fields, ALWAYS use a <select> with exactly two options: Male and Female (display labels), with lowercase values "male" and "female": <select name="gender"><option value="">Select Gender</option><option value="male">Male</option><option value="female">Female</option></select>
+    - Do NOT generate file upload inputs (type="file") in forms — only text-based inputs are supported
+    - Every form MUST include at least an email field, a phone field, or both. Never create a form without at least one of these.
+    - When including a phone field, ALWAYS render it with a country code selector: a <select name="country_code"> placed next to <input name="phone"> in a flex row, with at least 10-15 common country codes (+1, +44, +91, etc.). On submission the final phone value should combine them.
+    - Example: <input name="email" type="email" />, <div className="flex gap-2"><select name="country_code"><option value="+1">+1</option><option value="+44">+44</option><option value="+91">+91</option></select><input name="phone" type="tel" className="flex-1" /></div>
 
 ═══════════════════════════════════════
   UNDERSTANDING USER INTENT
