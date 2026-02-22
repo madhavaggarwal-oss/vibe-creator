@@ -213,6 +213,8 @@ const CALENDAR_RESPONSIVE_STYLES = `
 
 // Pre-built useCalendarData hook injected into Sandpack when calendar data is available.
 // This provides real GHL slot data to LLM-generated calendar UI components.
+// Selection tracking (date/time the user picks) is handled entirely by the bridge
+// click listener — the hook is a pure data provider with no selection state.
 const CALENDAR_DATA_HOOK = `export interface CalendarData {
   slots: Record<string, string[]>;
   slotDuration: number;
@@ -572,6 +574,21 @@ export default function ReactProjectPreview({
     if (startRoute && startRoute !== "/") {
       bridgeLines.push(`if (window.location.hash !== "#${startRoute}") { window.location.hash = "#${startRoute}"; }`);
     }
+    // Suppress alert/confirm/prompt — AI-generated code often uses alert() as a placeholder
+    // for form submission feedback, but real submissions are handled by the bridge intercept.
+    bridgeLines.push(`window.alert = function(msg) { console.log("[Sandpack] alert suppressed:", msg); };`);
+    bridgeLines.push(`window.confirm = function(msg) { console.log("[Sandpack] confirm suppressed:", msg); return true; };`);
+    bridgeLines.push(`window.prompt = function(msg) { console.log("[Sandpack] prompt suppressed:", msg); return null; };`);
+    // Inject loading spinner styles for submit button — uses ::after pseudo-element
+    // so we never touch the button's child nodes (which would crash React on navigation)
+    bridgeLines.push(`(function() {
+  var s = document.createElement("style");
+  s.textContent = "@keyframes __ghl-spin{to{transform:rotate(360deg)}}" +
+    ".__ghl-loading{pointer-events:none!important;opacity:0.85!important;}" +
+    ".__ghl-loading::after{content:'';display:inline-block;vertical-align:middle;width:16px;height:16px;margin-left:8px;" +
+    "border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:__ghl-spin .6s linear infinite;}";
+  document.head.appendChild(s);
+})();`);
     // Broken image fallback: listen for img load errors and apply gradient placeholder
     bridgeLines.push(`document.addEventListener("error", (e) => {
   if (e.target && e.target.tagName === "IMG") {
@@ -664,7 +681,8 @@ document.addEventListener("submit", function(e) {
     var inputs = form.querySelectorAll("input, select, textarea");
     for (var i = 0; i < inputs.length; i++) {
       var el = inputs[i];
-      if (el.type === "file" || el.type === "submit" || el.type === "button" || el.type === "reset" || el.type === "hidden") continue;
+      if (el.type === "file" || el.type === "submit" || el.type === "button" || el.type === "reset") continue;
+      if (el.type === "hidden") continue;
 
       var fieldName = __ghlFieldName(el);
       if (!fieldName) continue;
@@ -700,11 +718,25 @@ document.addEventListener("submit", function(e) {
       console.log("[GHL] Combined phone with country code:", fields["phone"]);
     }
 
+    // Collect booking data from globals set by the click tracker
+    var bookingData = null;
+    var selectedSlot = window.__SELECTED_BOOKING_SLOT__;
+    if (window.__CALENDAR_DATA__) {
+      if (selectedSlot) {
+        bookingData = { selectedSlot: selectedSlot };
+        console.log("[Booking] Form submit — slot captured:", selectedSlot);
+      } else {
+        console.warn("[Booking] Form submit — calendar exists but no slot selected. Date/time clicks may not have been detected.");
+      }
+    }
+
     console.log("[GHL] Collected fields:", JSON.stringify(fields, null, 2));
     if (customFieldKeys.length) console.log("[GHL] Custom field keys:", customFieldKeys);
 
-    // Send to parent with explicit custom field markers and labels
-    window.parent.postMessage({ type: "ghl-form-submit", fields: fields, customFieldKeys: customFieldKeys, customFieldLabels: customFieldLabels }, "*");
+    // Send to parent with explicit custom field markers, labels, and booking data
+    var payload = { type: "ghl-form-submit", fields: fields, customFieldKeys: customFieldKeys, customFieldLabels: customFieldLabels };
+    if (bookingData) payload.bookingData = bookingData;
+    window.parent.postMessage(payload, "*");
 
     // Disable submit button — ONLY use attribute/style changes (never .textContent or .value)
     // because modifying child nodes causes React to crash with "removeChild" errors
@@ -712,8 +744,7 @@ document.addEventListener("submit", function(e) {
     var submitBtn = form.querySelector('button[type="submit"], button:not([type]), input[type="submit"]');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.style.opacity = "0.6";
-      submitBtn.style.pointerEvents = "none";
+      submitBtn.classList.add("__ghl-loading");
     }
   } catch(submitErr) {
     console.error("[GHL] Form submit error:", submitErr);
@@ -733,8 +764,7 @@ document.addEventListener("submit", function(e) {
       var btn = forms[i].querySelector('button[type="submit"], button:not([type]), input[type="submit"]');
       if (btn && btn.disabled) {
         btn.disabled = false;
-        btn.style.opacity = "";
-        btn.style.pointerEvents = "";
+        btn.classList.remove("__ghl-loading");
       }
     }
 
@@ -767,6 +797,13 @@ document.addEventListener("submit", function(e) {
     // Reset form on success
     if (e.data.success) {
       for (var j = 0; j < forms.length; j++) { forms[j].reset(); }
+
+      // For booking forms: reload after toast to reset React state back to calendar view
+      if (window.__CALENDAR_DATA__) {
+        window.__SELECTED_BOOKING_SLOT__ = null;
+        console.log("[Booking] Appointment confirmed — reloading to calendar view in 2s");
+        setTimeout(function() { window.location.reload(); }, 2000);
+      }
     }
   } catch(resultErr) {
     console.error("[GHL] Form result handler error:", resultErr);
@@ -776,6 +813,144 @@ document.addEventListener("submit", function(e) {
     // Inject calendar data into iframe global so generated calendar components can read it
     if (calendarData) {
       bridgeLines.push(`window.__CALENDAR_DATA__ = ${JSON.stringify(calendarData)};`);
+
+      // Click-based booking slot tracker: detects date & time selections purely from DOM
+      // clicks, matching against known available data in __CALENDAR_DATA__. Zero AI cooperation needed.
+      bridgeLines.push(`(function() {
+  var __bookingDate = null;
+  var __bookingTime = null;
+  window.__SELECTED_BOOKING_SLOT__ = null;
+  console.log("[Booking] Click tracker initialized. Available dates:", Object.keys(window.__CALENDAR_DATA__.slots).length);
+
+  function syncGlobal() {
+    if (__bookingDate && __bookingTime) {
+      window.__SELECTED_BOOKING_SLOT__ = __bookingDate + "T" + __bookingTime + ":00";
+      console.log("[Booking] Slot ready:", window.__SELECTED_BOOKING_SLOT__);
+    } else {
+      window.__SELECTED_BOOKING_SLOT__ = null;
+      console.log("[Booking] Slot incomplete — date:", __bookingDate, "time:", __bookingTime);
+    }
+  }
+
+  // Convert 24h time "HH:MM" to normalized 24h string, or return null
+  function textToTime24(text) {
+    text = text.replace(/\\s+/g, " ").trim();
+    // Match patterns: "9:00 AM", "09:00", "2:30 PM", "14:30", "9:00am"
+    var m = text.match(/^(\\d{1,2}):(\\d{2})\\s*(am|pm)?$/i);
+    if (!m) return null;
+    var h = parseInt(m[1], 10);
+    var min = m[2];
+    var period = (m[3] || "").toLowerCase();
+    if (period === "pm" && h < 12) h += 12;
+    if (period === "am" && h === 12) h = 0;
+    if (h > 23) return null;
+    return String(h).padStart(2, "0") + ":" + min;
+  }
+
+  // Build a set of all valid 24h time strings across all dates
+  function getAllTimes() {
+    var cd = window.__CALENDAR_DATA__;
+    if (!cd || !cd.slots) return {};
+    var map = {};
+    var dates = Object.keys(cd.slots);
+    for (var d = 0; d < dates.length; d++) {
+      var times = cd.slots[dates[d]];
+      for (var t = 0; t < times.length; t++) {
+        map[times[t]] = true;
+      }
+    }
+    return map;
+  }
+
+  // Match a day number to an available date key
+  function matchDay(dayNum) {
+    var cd = window.__CALENDAR_DATA__;
+    if (!cd || !cd.slots) return null;
+    var candidates = [];
+    var dates = Object.keys(cd.slots);
+    for (var i = 0; i < dates.length; i++) {
+      if (parseInt(dates[i].split("-")[2], 10) === dayNum) {
+        candidates.push(dates[i]);
+      }
+    }
+    if (candidates.length === 1) return candidates[0];
+    if (candidates.length > 1) {
+      // If a date was previously selected in the same month, prefer that month
+      if (__bookingDate) {
+        var prevMonth = __bookingDate.substring(0, 7);
+        for (var j = 0; j < candidates.length; j++) {
+          if (candidates[j].substring(0, 7) === prevMonth) return candidates[j];
+        }
+      }
+      // Otherwise pick closest to today
+      var now = Date.now();
+      candidates.sort(function(a, b) {
+        return Math.abs(new Date(a).getTime() - now) - Math.abs(new Date(b).getTime() - now);
+      });
+      return candidates[0];
+    }
+    return null;
+  }
+
+  document.addEventListener("click", function(e) {
+    if (!window.__CALENDAR_DATA__) return;
+
+    // Walk from click target up a few levels to find meaningful text
+    var allTimes = getAllTimes();
+    var el = e.target;
+    for (var depth = 0; el && el !== document.body && depth < 4; el = el.parentElement, depth++) {
+      var raw = (el.textContent || "").trim();
+      if (!raw || raw.length > 30) continue;
+
+      // --- TIME CHECK ---
+      // Extract time-like pattern from text (handles "9:00 AM", "14:30", "9:00 AM 30 min", etc.)
+      var timePatternMatch = raw.match(/(\\d{1,2}:\\d{2})\\s*(am|pm)?/i);
+      if (timePatternMatch) {
+        var candidate = timePatternMatch[1] + (timePatternMatch[2] ? " " + timePatternMatch[2] : "");
+        var t24 = textToTime24(candidate);
+        if (t24 && allTimes[t24]) {
+          // Verify this time exists for the currently selected date (if any)
+          var cd = window.__CALENDAR_DATA__;
+          if (__bookingDate && cd.slots[__bookingDate]) {
+            var dateSlots = cd.slots[__bookingDate];
+            for (var ts = 0; ts < dateSlots.length; ts++) {
+              if (dateSlots[ts] === t24) {
+                __bookingTime = t24;
+                syncGlobal();
+                console.log("[Booking] Time selected via click:", t24, "date:", __bookingDate);
+                return;
+              }
+            }
+          }
+          // No date selected yet or time not in current date — still record it
+          __bookingTime = t24;
+          syncGlobal();
+          console.log("[Booking] Time selected via click:", t24, "(no date context yet)");
+          return;
+        }
+      }
+
+      // --- DATE CHECK ---
+      // Day number: text is exactly 1-2 digits representing a day (1-31)
+      if (/^\\d{1,2}$/.test(raw)) {
+        var dayNum = parseInt(raw, 10);
+        if (dayNum >= 1 && dayNum <= 31) {
+          var matched = matchDay(dayNum);
+          if (matched) {
+            __bookingDate = matched;
+            __bookingTime = null;
+            syncGlobal();
+            console.log("[Booking] Date selected via click:", matched);
+            return;
+          }
+        }
+      }
+
+      // Stop walking up at interactive elements
+      if (el.tagName === "BUTTON" || el.tagName === "A" || el.getAttribute("role") === "button") break;
+    }
+  }, true);
+})();`);
     } else {
       bridgeLines.push(`window.__CALENDAR_DATA__ = null;`);
     }

@@ -116,10 +116,12 @@ EXAMPLE USAGE:
         <div className="w-full lg:w-1/2">
           {/* ... booking form with contextual fields */}
           {/* ... form follows all FORMS / GHL rules (name attributes, data-ghl-custom, phone+country_code) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <input name="firstName" className="w-full ..." />
-            <input name="lastName" className="w-full ..." />
-          </div>
+          <form>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <input name="firstName" className="w-full ..." />
+              <input name="lastName" className="w-full ..." />
+            </div>
+          </form>
         </div>
       </div>
     );

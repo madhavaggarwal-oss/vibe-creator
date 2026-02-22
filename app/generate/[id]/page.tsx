@@ -420,16 +420,52 @@ export default function GenerateResultPage() {
     const handleGhlFormSubmit = async (e: MessageEvent) => {
       if (!e.data || e.data.type !== "ghl-form-submit") return;
 
-      const { fields, customFieldKeys, customFieldLabels } = e.data;
+      const { fields, customFieldKeys, customFieldLabels, bookingData } = e.data;
       if (!fields || Object.keys(fields).length === 0) return;
 
       console.log("[GHL] Received form submission from iframe:", fields);
       if (customFieldKeys?.length) console.log("[GHL] Custom field keys:", customFieldKeys);
       if (customFieldLabels && Object.keys(customFieldLabels).length) console.log("[GHL] Custom field labels:", customFieldLabels);
+      if (bookingData) console.log("[GHL] Booking data:", bookingData);
 
       const iframe = document.querySelector('.sp-preview-iframe') as HTMLIFrameElement;
 
       try {
+        // Step 0: Verify slot availability before creating contact
+        if (bookingData?.selectedSlot && selectedCalendarId) {
+          console.log("[Booking] Verifying slot availability — selected:", bookingData.selectedSlot, "calendarId:", selectedCalendarId);
+          try {
+            const slotsRes = await fetch(`/api/ghl/calendars/${selectedCalendarId}/slots`);
+            const slotsData = await slotsRes.json();
+            console.log("[Booking] Fresh slots response:", slotsRes.status, "days:", slotsRes.ok && slotsData.slots ? Object.keys(slotsData.slots).length : "N/A");
+            if (slotsRes.ok && slotsData.slots) {
+              const freshSlots = slotsData.slots as Record<string, string[]>;
+              const dateKey = bookingData.selectedSlot.substring(0, 10);
+              const time = bookingData.selectedSlot.substring(11, 16);
+              const slotsForDate = freshSlots[dateKey];
+              const isAvailable = slotsForDate?.includes(time);
+              console.log("[Booking] Checking date:", dateKey, "time:", time, "— slots for date:", slotsForDate?.length ?? 0, "available:", isAvailable);
+
+              if (!isAvailable) {
+                console.warn("[Booking] Slot unavailable! Remaining slots for", dateKey + ":", slotsForDate ?? "no slots for this date");
+                // Show error toast asking user to refresh availability
+                iframe?.contentWindow?.postMessage({
+                  type: "ghl-form-result",
+                  success: false,
+                  message: "The selected time slot is no longer available. Please refresh availability and choose another slot.",
+                }, "*");
+                console.log("[Booking] Aborting submission — slot no longer available");
+                return;
+              }
+
+              console.log("[Booking] Slot verified available — proceeding with submission");
+            }
+          } catch (slotCheckErr) {
+            console.warn("[Booking] Slot availability check failed, proceeding with submission anyway:", slotCheckErr);
+          }
+        }
+
+        // Step 1: Create contact
         const res = await fetch("/api/ghl/contact", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -438,15 +474,63 @@ export default function GenerateResultPage() {
 
         let data: Record<string, unknown> = {};
         try { data = await res.json(); } catch { /* non-JSON response */ }
-        console.log("[GHL] API response:", res.status, data);
+        console.log("[GHL] Contact API response:", res.status, data);
 
-        iframe?.contentWindow?.postMessage({
-          type: "ghl-form-result",
-          success: res.ok,
-          message: res.ok
-            ? "Form submitted successfully!"
-            : (typeof data.error === "string" ? data.error : "Submission failed"),
-        }, "*");
+        if (!res.ok) {
+          iframe?.contentWindow?.postMessage({
+            type: "ghl-form-result",
+            success: false,
+            message: typeof data.error === "string" ? data.error : "Submission failed",
+          }, "*");
+          return;
+        }
+
+        // Step 2: If booking data exists, create appointment
+        if (bookingData?.selectedSlot && selectedCalendarId && data.contactId) {
+          const appointmentRequest = {
+            contactId: data.contactId,
+            calendarId: selectedCalendarId,
+            selectedSlot: bookingData.selectedSlot,
+            slotDuration: selectedCalendarSlotDuration || 30,
+          };
+          console.log("[Booking] Creating appointment:", JSON.stringify(appointmentRequest, null, 2));
+          try {
+            const apptRes = await fetch("/api/ghl/book-appointment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(appointmentRequest),
+            });
+
+            let apptData: Record<string, unknown> = {};
+            try { apptData = await apptRes.json(); } catch { /* non-JSON response */ }
+            console.log("[Booking] Appointment API response:", apptRes.status, apptData);
+
+            iframe?.contentWindow?.postMessage({
+              type: "ghl-form-result",
+              success: apptRes.ok,
+              message: apptRes.ok
+                ? "Appointment booked successfully!"
+                : (typeof apptData.error === "string" ? apptData.error : "Failed to book appointment"),
+            }, "*");
+          } catch (apptErr) {
+            console.error("[GHL] Appointment network error:", apptErr);
+            iframe?.contentWindow?.postMessage({
+              type: "ghl-form-result",
+              success: false,
+              message: "Contact saved but failed to book appointment. Please try again.",
+            }, "*");
+          }
+        } else {
+          // Regular form (no booking) — log why booking was skipped if any booking data was partially present
+          if (bookingData || selectedCalendarId) {
+            console.warn("[Booking] Skipped appointment creation — selectedSlot:", bookingData?.selectedSlot ?? "missing", "calendarId:", selectedCalendarId ?? "missing", "contactId:", data.contactId ?? "missing");
+          }
+          iframe?.contentWindow?.postMessage({
+            type: "ghl-form-result",
+            success: true,
+            message: "Form submitted successfully!",
+          }, "*");
+        }
       } catch (err) {
         console.error("[GHL] Network error:", err);
         iframe?.contentWindow?.postMessage({
@@ -459,7 +543,7 @@ export default function GenerateResultPage() {
 
     window.addEventListener("message", handleGhlFormSubmit);
     return () => window.removeEventListener("message", handleGhlFormSubmit);
-  }, []);
+  }, [selectedCalendarId, selectedCalendarSlotDuration]);
 
   // Project files for Sandpack preview
   const projectFiles = funnel?.files || null;
@@ -1669,57 +1753,68 @@ export default function GenerateResultPage() {
                   </div>
                 </div>
 
-                {/* Calendar selection cards — for initial generation (before chat messages) */}
-                {hasCalendar && !selectedCalendarId && !calendarFromEdit && (
+                {/* Calendar detection + selection — for initial generation (before chat messages) */}
+                {hasCalendar && !calendarFromEdit && (
                   <div className="py-2">
                     <p className="text-[14.5px] font-sans text-gray-700 mb-3">
                       I detected a calendar/booking component in your project. Please select a calendar to connect:
                     </p>
-                    {calendarLoading ? (
-                      <div className="flex items-center gap-2 py-2">
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-                        <span className="text-sm text-gray-500">Loading calendars...</span>
-                      </div>
-                    ) : calendarError ? (
-                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                        <p className="text-sm text-red-600">{calendarError}</p>
-                        <button
-                          onClick={fetchCalendars}
-                          className="mt-1 text-xs text-red-500 underline hover:text-red-700"
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    ) : calendarList.length === 0 ? (
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                        <p className="text-sm text-gray-500">No calendars found in your GHL account.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {calendarList.map((cal) => (
+                    {!selectedCalendarId ? (
+                      calendarLoading ? (
+                        <div className="flex items-center gap-2 py-2">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                          <span className="text-sm text-gray-500">Loading calendars...</span>
+                        </div>
+                      ) : calendarError ? (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                          <p className="text-sm text-red-600">{calendarError}</p>
                           <button
-                            key={cal.id}
-                            onClick={() => handleCalendarSelect(cal.id, cal.name)}
-                            className="w-full text-left rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group"
+                            onClick={fetchCalendars}
+                            className="mt-1 text-xs text-red-500 underline hover:text-red-700"
                           >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-sm font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{cal.name}</p>
-                                <div className="flex items-center gap-3 mt-1">
-                                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
-                                    {cal.calendarType}
-                                  </span>
-                                  <span className="text-xs text-gray-400">
-                                    {cal.slotDuration} min slots
-                                  </span>
-                                </div>
-                              </div>
-                              <svg className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                              </svg>
-                            </div>
+                            Retry
                           </button>
-                        ))}
+                        </div>
+                      ) : calendarList.length === 0 ? (
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                          <p className="text-sm text-gray-500">No calendars found in your GHL account.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {calendarList.map((cal) => (
+                            <button
+                              key={cal.id}
+                              onClick={() => handleCalendarSelect(cal.id, cal.name)}
+                              className="w-full text-left rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{cal.name}</p>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+                                      {cal.calendarType}
+                                    </span>
+                                    <span className="text-xs text-gray-400">
+                                      {cal.slotDuration} min slots
+                                    </span>
+                                  </div>
+                                </div>
+                                <svg className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                </svg>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                        <svg className="h-4 w-4 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="text-sm text-green-700">
+                          Connected to calendar: <span className="font-medium">{selectedCalendarName}</span>
+                        </p>
                       </div>
                     )}
                   </div>
@@ -1762,16 +1857,7 @@ export default function GenerateResultPage() {
                       </div>
                     )}
                     {msg.role === "calendar-connected" ? (
-                      <div className="py-1.5">
-                        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
-                          <svg className="h-4 w-4 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <p className="text-sm text-green-700">
-                            Connected to calendar: <span className="font-medium">{msg.content}</span>
-                          </p>
-                        </div>
-                      </div>
+                      null /* Rendered inline in the calendar detection block above */
                     ) : msg.role === "user" ? (
                       <div className="flex justify-end">
                         <div className="max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-sm bg-white border border-gray-200">
@@ -1786,57 +1872,68 @@ export default function GenerateResultPage() {
                   </div>
                 ))}
 
-                {/* Calendar selection cards — for edit flow (after chat messages) */}
-                {hasCalendar && !selectedCalendarId && calendarFromEdit && (
+                {/* Calendar detection + selection — for edit flow (after chat messages) */}
+                {hasCalendar && calendarFromEdit && (
                   <div className="py-2">
                     <p className="text-[14.5px] font-sans text-gray-700 mb-3">
                       I detected a calendar/booking component in your project. Please select a calendar to connect:
                     </p>
-                    {calendarLoading ? (
-                      <div className="flex items-center gap-2 py-2">
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-                        <span className="text-sm text-gray-500">Loading calendars...</span>
-                      </div>
-                    ) : calendarError ? (
-                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                        <p className="text-sm text-red-600">{calendarError}</p>
-                        <button
-                          onClick={fetchCalendars}
-                          className="mt-1 text-xs text-red-500 underline hover:text-red-700"
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    ) : calendarList.length === 0 ? (
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                        <p className="text-sm text-gray-500">No calendars found in your GHL account.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {calendarList.map((cal) => (
+                    {!selectedCalendarId ? (
+                      calendarLoading ? (
+                        <div className="flex items-center gap-2 py-2">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                          <span className="text-sm text-gray-500">Loading calendars...</span>
+                        </div>
+                      ) : calendarError ? (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                          <p className="text-sm text-red-600">{calendarError}</p>
                           <button
-                            key={cal.id}
-                            onClick={() => handleCalendarSelect(cal.id, cal.name)}
-                            className="w-full text-left rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group"
+                            onClick={fetchCalendars}
+                            className="mt-1 text-xs text-red-500 underline hover:text-red-700"
                           >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-sm font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{cal.name}</p>
-                                <div className="flex items-center gap-3 mt-1">
-                                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
-                                    {cal.calendarType}
-                                  </span>
-                                  <span className="text-xs text-gray-400">
-                                    {cal.slotDuration} min slots
-                                  </span>
-                                </div>
-                              </div>
-                              <svg className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                              </svg>
-                            </div>
+                            Retry
                           </button>
-                        ))}
+                        </div>
+                      ) : calendarList.length === 0 ? (
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                          <p className="text-sm text-gray-500">No calendars found in your GHL account.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {calendarList.map((cal) => (
+                            <button
+                              key={cal.id}
+                              onClick={() => handleCalendarSelect(cal.id, cal.name)}
+                              className="w-full text-left rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{cal.name}</p>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+                                      {cal.calendarType}
+                                    </span>
+                                    <span className="text-xs text-gray-400">
+                                      {cal.slotDuration} min slots
+                                    </span>
+                                  </div>
+                                </div>
+                                <svg className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                </svg>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                        <svg className="h-4 w-4 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="text-sm text-green-700">
+                          Connected to calendar: <span className="font-medium">{selectedCalendarName}</span>
+                        </p>
                       </div>
                     )}
                   </div>
