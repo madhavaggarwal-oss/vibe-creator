@@ -24,7 +24,9 @@ The user will describe a website or landing page. Generate a complete, stunning 
 ═══════════════════════════════════════
 
 Return ONLY a valid JSON object. No markdown, no code fences, no explanation.
-The object must have exactly one key: "files" — a Record<string, string> mapping file paths to their content.
+The object must have exactly two keys:
+- "files" — a Record<string, string> mapping file paths to their content
+- "hasCalendar" — a boolean indicating whether any generated page contains a calendar, booking, or appointment scheduling component/widget. Set to true if ANY page includes a section for scheduling appointments, booking calls, or selecting time slots. Set to false otherwise.
 
 {
   "files": {
@@ -39,8 +41,89 @@ The object must have exactly one key: "files" — a Record<string, string> mappi
     "/src/components/Navbar.tsx": "...",
     "/src/components/Hero.tsx": "...",
     "/src/components/Footer.tsx": "..."
-  }
+  },
+  "hasCalendar": false
 }
+
+═══════════════════════════════════════
+  CALENDAR / BOOKING COMPONENTS
+═══════════════════════════════════════
+
+When generating calendar, booking, or appointment scheduling UI, you MUST use the pre-built data hook and build the entire UI yourself.
+
+DATA HOOK — useCalendarData():
+A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real calendar slot data from the host application.
+- Import: import { useCalendarData } from "../hooks/useCalendarData"
+  (adjust the relative path based on the importing file's location — e.g. from /src/pages/ use "../hooks/useCalendarData")
+- Returns: { slots, slotDuration, calendarId } or null (while loading)
+  - slots: Record<string, string[]> — keys are ISO date strings like "2026-02-24", values are arrays of time strings in HH:mm format like ["09:00", "09:30", "10:00"]
+  - slotDuration: number — appointment duration in minutes (e.g. 30)
+  - calendarId: string — the calendar identifier
+- Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
+
+YOUR RESPONSIBILITIES — Build the complete calendar UI:
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed.
+2. Time slot picker: when a date is selected, show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration.
+3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context (e.g. dental clinic → name, email, phone, insurance provider, reason for visit). The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern).
+4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
+5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.
+6. Do NOT hardcode any dates, times, or slot durations — always read from calendarData.
+7. Do NOT position status badges, info cards, or decorative overlays using absolute/fixed positioning over the calendar grid.
+8. Show a loading state when calendarData is null.
+9. RESPONSIVE LAYOUT (CRITICAL):
+   - Calendar+form wrapper: use \`flex flex-col lg:flex-row\` so they stack on mobile and sit side-by-side on desktop
+   - Calendar and form panels: use \`w-full lg:w-1/2\` (or similar) — full width when stacked, half when side-by-side
+   - Time slot grid: use \`grid grid-cols-2 sm:grid-cols-3\` so slots reduce columns on small screens
+   - Form field pairs (e.g. first/last name): use \`grid grid-cols-1 sm:grid-cols-2\` to stack on mobile
+   - All form inputs MUST use \`w-full\` — never fixed pixel widths
+   - The calendar grid (grid-cols-7) naturally fits mobile — keep it as-is
+10. DATE KEY FORMAT (CRITICAL — timezone bug prevention):
+   - A \`formatDateKey(year, month, day)\` helper is exported from the hook file — import and use it:
+     import { useCalendarData, formatDateKey, formatSlotTime } from "../hooks/useCalendarData"
+   - Use it to build date keys: formatDateKey(year, month, day) → "YYYY-MM-DD"
+   - month is 0-indexed (0 = January, 11 = December), same as Date.getMonth()
+   - NEVER use new Date().toISOString() to build date keys — toISOString() converts to UTC which shifts the date by ±1 day in non-UTC timezones
+   - NEVER use toLocaleDateString() — output format varies by browser locale
+
+EXAMPLE USAGE:
+  import { useState } from "react";
+  import { useCalendarData, formatDateKey, formatSlotTime } from "../hooks/useCalendarData";
+
+  export default function BookingSection() {
+    const calendarData = useCalendarData();
+    const [selectedDate, setSelectedDate] = useState<string | null>(null);
+    const [selectedTime, setSelectedTime] = useState<string | null>(null);
+
+    if (!calendarData) return <div>Loading calendar...</div>;
+
+    const { slots, slotDuration } = calendarData;
+    const availableDates = new Set(Object.keys(slots));
+
+    // Build date key for each calendar cell using formatDateKey (NOT toISOString):
+    // const dateKey = formatDateKey(year, month, day); // e.g. "2026-02-27"
+    // const hasSlots = availableDates.has(dateKey);
+
+    return (
+      {/* RESPONSIVE WRAPPER — stacks on mobile, side-by-side on desktop */}
+      <div className="flex flex-col lg:flex-row gap-8">
+        <div className="w-full lg:w-1/2">
+          {/* ... month grid (grid-cols-7), use formatDateKey(year, month, day) for each cell */}
+          {/* ... on date click: setSelectedDate(formatDateKey(year, month, day)) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {/* ... time slot buttons from slots[selectedDate] */}
+          </div>
+        </div>
+        <div className="w-full lg:w-1/2">
+          {/* ... booking form with contextual fields */}
+          {/* ... form follows all FORMS / GHL rules (name attributes, data-ghl-custom, phone+country_code) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <input name="firstName" className="w-full ..." />
+            <input name="lastName" className="w-full ..." />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
 ═══════════════════════════════════════
   PAGE SCOPE
@@ -410,7 +493,9 @@ YOUR TASK: Recreate this website as an EXACT visual replica using React + TypeSc
 ═══════════════════════════════════════
 
 Return ONLY a valid JSON object. No markdown, no code fences, no explanation.
-The object must have exactly one key: "files" — a Record<string, string> mapping file paths to their content.
+The object must have exactly two keys:
+- "files" — a Record<string, string> mapping file paths to their content
+- "hasCalendar" — a boolean indicating whether any generated page contains a calendar, booking, or appointment scheduling component/widget. Set to true if ANY page includes a section for scheduling appointments, booking calls, or selecting time slots. Set to false otherwise.
 
 Example structure:
 {
@@ -426,8 +511,49 @@ Example structure:
     "/src/components/Navbar.tsx": "...",
     "/src/components/Hero.tsx": "...",
     "/src/components/Footer.tsx": "..."
-  }
+  },
+  "hasCalendar": false
 }
+
+═══════════════════════════════════════
+  CALENDAR / BOOKING COMPONENTS
+═══════════════════════════════════════
+
+When generating calendar, booking, or appointment scheduling UI, you MUST use the pre-built data hook and build the entire UI yourself.
+
+DATA HOOK — useCalendarData():
+A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real calendar slot data from the host application.
+- Import: import { useCalendarData } from "../hooks/useCalendarData"
+  (adjust the relative path based on the importing file's location — e.g. from /src/pages/ use "../hooks/useCalendarData")
+- Returns: { slots, slotDuration, calendarId } or null (while loading)
+  - slots: Record<string, string[]> — keys are ISO date strings like "2026-02-24", values are arrays of time strings in HH:mm format like ["09:00", "09:30", "10:00"]
+  - slotDuration: number — appointment duration in minutes (e.g. 30)
+  - calendarId: string — the calendar identifier
+- Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
+
+YOUR RESPONSIBILITIES — Build the complete calendar UI:
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed.
+2. Time slot picker: when a date is selected, show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration.
+3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context. The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern).
+4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
+5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.
+6. Do NOT hardcode any dates, times, or slot durations — always read from calendarData.
+7. Do NOT position status badges, info cards, or decorative overlays using absolute/fixed positioning over the calendar grid.
+8. Show a loading state when calendarData is null.
+9. RESPONSIVE LAYOUT (CRITICAL):
+   - Calendar+form wrapper: use \`flex flex-col lg:flex-row\` so they stack on mobile and sit side-by-side on desktop
+   - Calendar and form panels: use \`w-full lg:w-1/2\` (or similar) — full width when stacked, half when side-by-side
+   - Time slot grid: use \`grid grid-cols-2 sm:grid-cols-3\` so slots reduce columns on small screens
+   - Form field pairs (e.g. first/last name): use \`grid grid-cols-1 sm:grid-cols-2\` to stack on mobile
+   - All form inputs MUST use \`w-full\` — never fixed pixel widths
+   - The calendar grid (grid-cols-7) naturally fits mobile — keep it as-is
+10. DATE KEY FORMAT (CRITICAL — timezone bug prevention):
+   - A \`formatDateKey(year, month, day)\` helper is exported from the hook file — import and use it:
+     import { useCalendarData, formatDateKey, formatSlotTime } from "../hooks/useCalendarData"
+   - Use it to build date keys: formatDateKey(year, month, day) → "YYYY-MM-DD"
+   - month is 0-indexed (0 = January, 11 = December), same as Date.getMonth()
+   - NEVER use new Date().toISOString() to build date keys — toISOString() converts to UTC which shifts the date by ±1 day in non-UTC timezones
+   - NEVER use toLocaleDateString() — output format varies by browser locale
 
 ═══════════════════════════════════════
   PIXEL-PERFECT CLONING RULES
@@ -608,7 +734,9 @@ const IMAGE_CLONE_SYSTEM_PROMPT = `You are a pixel-perfect website cloning speci
 ═══════════════════════════════════════
 
 Return ONLY a valid JSON object. No markdown, no code fences, no explanation.
-The object must have exactly one key: "files" — a Record<string, string> mapping file paths to their content.
+The object must have exactly two keys:
+- "files" — a Record<string, string> mapping file paths to their content
+- "hasCalendar" — a boolean indicating whether any generated page contains a calendar, booking, or appointment scheduling component/widget. Set to true if ANY page includes a section for scheduling appointments, booking calls, or selecting time slots. Set to false otherwise.
 
 Example structure:
 {
@@ -624,8 +752,49 @@ Example structure:
     "/src/components/Navbar.tsx": "...",
     "/src/components/Hero.tsx": "...",
     "/src/components/Footer.tsx": "..."
-  }
+  },
+  "hasCalendar": false
 }
+
+═══════════════════════════════════════
+  CALENDAR / BOOKING COMPONENTS
+═══════════════════════════════════════
+
+When generating calendar, booking, or appointment scheduling UI, you MUST use the pre-built data hook and build the entire UI yourself.
+
+DATA HOOK — useCalendarData():
+A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real calendar slot data from the host application.
+- Import: import { useCalendarData } from "../hooks/useCalendarData"
+  (adjust the relative path based on the importing file's location — e.g. from /src/pages/ use "../hooks/useCalendarData")
+- Returns: { slots, slotDuration, calendarId } or null (while loading)
+  - slots: Record<string, string[]> — keys are ISO date strings like "2026-02-24", values are arrays of time strings in HH:mm format like ["09:00", "09:30", "10:00"]
+  - slotDuration: number — appointment duration in minutes (e.g. 30)
+  - calendarId: string — the calendar identifier
+- Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
+
+YOUR RESPONSIBILITIES — Build the complete calendar UI:
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed.
+2. Time slot picker: when a date is selected, show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration.
+3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context. The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern).
+4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
+5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.
+6. Do NOT hardcode any dates, times, or slot durations — always read from calendarData.
+7. Do NOT position status badges, info cards, or decorative overlays using absolute/fixed positioning over the calendar grid.
+8. Show a loading state when calendarData is null.
+9. RESPONSIVE LAYOUT (CRITICAL):
+   - Calendar+form wrapper: use \`flex flex-col lg:flex-row\` so they stack on mobile and sit side-by-side on desktop
+   - Calendar and form panels: use \`w-full lg:w-1/2\` (or similar) — full width when stacked, half when side-by-side
+   - Time slot grid: use \`grid grid-cols-2 sm:grid-cols-3\` so slots reduce columns on small screens
+   - Form field pairs (e.g. first/last name): use \`grid grid-cols-1 sm:grid-cols-2\` to stack on mobile
+   - All form inputs MUST use \`w-full\` — never fixed pixel widths
+   - The calendar grid (grid-cols-7) naturally fits mobile — keep it as-is
+10. DATE KEY FORMAT (CRITICAL — timezone bug prevention):
+   - A \`formatDateKey(year, month, day)\` helper is exported from the hook file — import and use it:
+     import { useCalendarData, formatDateKey, formatSlotTime } from "../hooks/useCalendarData"
+   - Use it to build date keys: formatDateKey(year, month, day) → "YYYY-MM-DD"
+   - month is 0-indexed (0 = January, 11 = December), same as Date.getMonth()
+   - NEVER use new Date().toISOString() to build date keys — toISOString() converts to UTC which shifts the date by ±1 day in non-UTC timezones
+   - NEVER use toLocaleDateString() — output format varies by browser locale
 
 ═══════════════════════════════════════
   MULTI-IMAGE HANDLING
@@ -878,18 +1047,60 @@ const EDIT_SYSTEM_PROMPT = `You are an elite web designer and frontend developer
   OUTPUT FORMAT
 ═══════════════════════════════════════
 
-Return ONLY a valid JSON object (no markdown, no code fences) with exactly two keys:
+Return ONLY a valid JSON object (no markdown, no code fences) with exactly three keys:
 
 {
   "message": "A brief 1-3 sentence summary of what you changed, written for the user.",
   "files": {
     "/src/components/Hero.tsx": "updated content...",
     "/src/App.tsx": "updated content if routes changed..."
-  }
+  },
+  "hasCalendar": false
 }
 
-The "files" object should ONLY contain files that were changed or newly created.
-To delete a file, set its value to null: "/src/components/OldComponent.tsx": null
+- The "files" object should ONLY contain files that were changed or newly created.
+- To delete a file, set its value to null: "/src/components/OldComponent.tsx": null
+- "hasCalendar" should reflect the state of the ENTIRE project after the edit (not just the changed files). If the project already had a calendar/booking component and the edit didn't remove it, set to true. If the edit adds a calendar/booking component, set to true. If the edit removes it, set to false.
+
+═══════════════════════════════════════
+  CALENDAR / BOOKING COMPONENTS
+═══════════════════════════════════════
+
+When generating calendar, booking, or appointment scheduling UI, you MUST use the pre-built data hook and build the entire UI yourself.
+
+DATA HOOK — useCalendarData():
+A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real calendar slot data from the host application.
+- Import: import { useCalendarData } from "../hooks/useCalendarData"
+  (adjust the relative path based on the importing file's location — e.g. from /src/pages/ use "../hooks/useCalendarData")
+- Returns: { slots, slotDuration, calendarId } or null (while loading)
+  - slots: Record<string, string[]> — keys are ISO date strings like "2026-02-24", values are arrays of time strings in HH:mm format like ["09:00", "09:30", "10:00"]
+  - slotDuration: number — appointment duration in minutes (e.g. 30)
+  - calendarId: string — the calendar identifier
+- Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
+
+YOUR RESPONSIBILITIES — Build the complete calendar UI:
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed.
+2. Time slot picker: when a date is selected, show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration.
+3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context. The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern).
+4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
+5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.
+6. Do NOT hardcode any dates, times, or slot durations — always read from calendarData.
+7. Do NOT position status badges, info cards, or decorative overlays using absolute/fixed positioning over the calendar grid.
+8. Show a loading state when calendarData is null.
+9. RESPONSIVE LAYOUT (CRITICAL):
+   - Calendar+form wrapper: use \`flex flex-col lg:flex-row\` so they stack on mobile and sit side-by-side on desktop
+   - Calendar and form panels: use \`w-full lg:w-1/2\` (or similar) — full width when stacked, half when side-by-side
+   - Time slot grid: use \`grid grid-cols-2 sm:grid-cols-3\` so slots reduce columns on small screens
+   - Form field pairs (e.g. first/last name): use \`grid grid-cols-1 sm:grid-cols-2\` to stack on mobile
+   - All form inputs MUST use \`w-full\` — never fixed pixel widths
+   - The calendar grid (grid-cols-7) naturally fits mobile — keep it as-is
+10. DATE KEY FORMAT (CRITICAL — timezone bug prevention):
+   - A \`formatDateKey(year, month, day)\` helper is exported from the hook file — import and use it:
+     import { useCalendarData, formatDateKey, formatSlotTime } from "../hooks/useCalendarData"
+   - Use it to build date keys: formatDateKey(year, month, day) → "YYYY-MM-DD"
+   - month is 0-indexed (0 = January, 11 = December), same as Date.getMonth()
+   - NEVER use new Date().toISOString() to build date keys — toISOString() converts to UTC which shifts the date by ±1 day in non-UTC timezones
+   - NEVER use toLocaleDateString() — output format varies by browser locale
 
 ═══════════════════════════════════════
   EDIT RULES
@@ -1309,6 +1520,7 @@ export async function editFunnel(
 ): Promise<{
   message: string;
   files: Record<string, string | null>;
+  hasCalendar: boolean;
 }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -1373,6 +1585,10 @@ export async function editFunnel(
 
   const parsed = parseAIJson(text) as Record<string, unknown>;
 
+  // Extract calendar detection flag
+  const hasCalendar = parsed.hasCalendar === true;
+  console.log(`[editFunnel] hasCalendar: ${hasCalendar}`);
+
   if (!parsed.files || typeof parsed.files !== "object") {
     throw new Error("Invalid response from AI: expected { files: {...} }");
   }
@@ -1399,7 +1615,7 @@ export async function editFunnel(
   const resolvedFiles = resolveCustomColors(fixedFiles);
   const repairedFiles = await validateAndRepairFiles(resolvedFiles);
 
-  return { message, files: { ...repairedFiles, ...otherFiles } };
+  return { message, files: { ...repairedFiles, ...otherFiles }, hasCalendar };
 }
 
 export interface ScrapeDataForGeneration {
@@ -1425,7 +1641,7 @@ export async function generateFunnel(
   scrapeData?: ScrapeDataForGeneration,
   signal?: AbortSignal,
   isImageClone?: boolean
-): Promise<Record<string, string>> {
+): Promise<{ files: Record<string, string>; hasCalendar: boolean }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY environment variable is not set");
@@ -1543,6 +1759,10 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
   const parsed = parseAIJson(text) as Record<string, unknown>;
   console.log("[generateFunnel] Parsed successfully");
 
+  // Extract calendar detection flag
+  const hasCalendar = parsed.hasCalendar === true;
+  console.log(`[generateFunnel] hasCalendar: ${hasCalendar}`);
+
   if (!parsed.files || typeof parsed.files !== "object") {
     throw new Error("Invalid response from AI: expected { files: {...} }");
   }
@@ -1590,5 +1810,5 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
   console.log("[generateFunnel] Running syntax repair...");
   const repairedFiles = await validateAndRepairFiles(resolvedFiles);
   console.log("[generateFunnel] Syntax repair done");
-  return repairedFiles;
+  return { files: repairedFiles, hasCalendar };
 }

@@ -26,6 +26,11 @@ export async function GET(
       chatHistory: funnel.chatHistory || [],
       preGenHistory: funnel.preGenHistory || [],
       createdAt: funnel.createdAt,
+      hasCalendar: funnel.hasCalendar || false,
+      selectedCalendarId: funnel.selectedCalendarId || null,
+      selectedCalendarName: funnel.selectedCalendarName || null,
+      selectedCalendarSlotDuration: funnel.selectedCalendarSlotDuration || null,
+      calendarSlots: funnel.calendarSlots || null,
     });
   }
 
@@ -60,9 +65,27 @@ export async function PATCH(
     funnel.preGenHistory = body.preGenHistory;
   }
 
+  // Replace full chat history (used when inserting calendar-connected messages)
+  if (Array.isArray(body.chatHistory)) {
+    funnel.chatHistory = body.chatHistory;
+  }
+
   // Append chat messages (used when edits are stopped — persist user prompt + stopped message)
   if (Array.isArray(body.appendChatHistory)) {
     funnel.chatHistory = [...funnel.chatHistory, ...body.appendChatHistory];
+  }
+
+  // Calendar integration fields
+  if (body.selectedCalendarId !== undefined) {
+    funnel.selectedCalendarId = body.selectedCalendarId || undefined;
+    funnel.selectedCalendarName = body.selectedCalendarName || undefined;
+    funnel.selectedCalendarSlotDuration = body.selectedCalendarSlotDuration || undefined;
+  }
+  if (body.calendarSlots !== undefined) {
+    funnel.calendarSlots = body.calendarSlots || undefined;
+  }
+  if (body.hasCalendar !== undefined) {
+    funnel.hasCalendar = body.hasCalendar;
   }
 
   await saveFunnel(funnel);

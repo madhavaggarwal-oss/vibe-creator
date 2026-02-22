@@ -51,6 +51,19 @@ interface FunnelData {
   chatHistory: ChatMessage[];
   preGenHistory?: ChatMessage[];
   createdAt: string;
+  hasCalendar?: boolean;
+  selectedCalendarId?: string | null;
+  selectedCalendarName?: string | null;
+  selectedCalendarSlotDuration?: number | null;
+  calendarSlots?: Record<string, string[]> | null;
+}
+
+interface GHLCalendarItem {
+  id: string;
+  name: string;
+  calendarType: string;
+  slotDuration: number;
+  description?: string;
 }
 
 // File tree node for nested folder structure
@@ -252,6 +265,19 @@ export default function GenerateResultPage() {
   const [codeLoading, setCodeLoading] = useState(false);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
 
+  // Calendar integration state
+  const [hasCalendar, setHasCalendar] = useState(false);
+  const [calendarList, setCalendarList] = useState<GHLCalendarItem[]>([]);
+  const [selectedCalendarId, setSelectedCalendarId] = useState<string | null>(null);
+  const [selectedCalendarName, setSelectedCalendarName] = useState<string | null>(null);
+  const [selectedCalendarSlotDuration, setSelectedCalendarSlotDuration] = useState<number | null>(null);
+  const [calendarSlots, setCalendarSlots] = useState<Record<string, string[]> | null>(null);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [calendarFromEdit, setCalendarFromEdit] = useState(false);
+  const [deferredCalendarAiMsg, setDeferredCalendarAiMsg] = useState<ChatMessage | null>(null);
+
   // Restore chat width from localStorage
   useEffect(() => {
     try {
@@ -442,6 +468,143 @@ export default function GenerateResultPage() {
   const [currentPage, setCurrentPage] = useState("/");
   const [pageSelectorOpen, setPageSelectorOpen] = useState(false);
 
+  // Derived calendar blocking states
+  const isCalendarBlocking = hasCalendar && !selectedCalendarId;
+  const isCalendarSlotsLoading = hasCalendar && !!selectedCalendarId && !calendarSlots;
+
+  // Calendar helper functions
+  const fetchCalendars = useCallback(async () => {
+    console.log("[Calendar] Fetching calendar list...");
+    setCalendarLoading(true);
+    setCalendarError(null);
+    try {
+      const res = await fetch("/api/ghl/calendars");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch calendars");
+      console.log("[Calendar] Loaded", data.calendars?.length, "calendars");
+      setCalendarList(data.calendars || []);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load calendars";
+      console.error("[Calendar] Error:", msg);
+      setCalendarError(msg);
+    } finally {
+      setCalendarLoading(false);
+    }
+  }, []);
+
+  const fetchSlots = useCallback(async (calendarId: string, funnelId: string) => {
+    console.log(`[Calendar] Fetching slots for calendar ${calendarId}...`);
+    setSlotsLoading(true);
+    try {
+      const res = await fetch(`/api/ghl/calendars/${calendarId}/slots`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch slots");
+      console.log("[Calendar] Loaded slots:", typeof data.slots === "object" ? Object.keys(data.slots).length + " days" : data.slots);
+      setCalendarSlots(data.slots);
+
+      // Persist to funnel
+      await fetch(`/api/funnel/${funnelId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calendarSlots: data.slots }),
+      });
+      console.log("[Calendar] Slots persisted to funnel");
+    } catch (err) {
+      console.error("[Calendar] Slots error:", err);
+      setCalendarSlots(null);
+    } finally {
+      setSlotsLoading(false);
+    }
+  }, []);
+
+  const handleCalendarSelect = useCallback(async (calendarId: string, calendarName: string) => {
+    if (!funnel) return;
+    console.log(`[Calendar] Selected calendar: ${calendarName} (${calendarId})`);
+
+    const selectedCal = calendarList.find(c => c.id === calendarId);
+    const slotDur = selectedCal?.slotDuration || 30;
+
+    setSelectedCalendarId(calendarId);
+    setSelectedCalendarName(calendarName);
+    setSelectedCalendarSlotDuration(slotDur);
+    console.log("[Calendar] Selection set — persisting to funnel and fetching slots...");
+
+    // Persist calendar selection to funnel
+    await fetch(`/api/funnel/${funnel.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        selectedCalendarId: calendarId,
+        selectedCalendarName: calendarName,
+        selectedCalendarSlotDuration: slotDur,
+      }),
+    });
+    console.log("[Calendar] Selection persisted to funnel");
+
+    // Fetch slots (loading state shown as transient UI in calendar section)
+    await fetchSlots(calendarId, funnel.id);
+    console.log("[Calendar] Slots fetched successfully");
+
+    // Persist the "Connected to calendar" badge as a chat message
+    const calendarMsg: ChatMessage = {
+      role: "calendar-connected",
+      content: calendarName,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Build updated chatHistory with the calendar-connected message
+    const currentHistory = [...(funnel.chatHistory || [])];
+
+    if (deferredCalendarAiMsg) {
+      // Edit flow: AI msg is already the last entry in chatHistory (persisted by /api/chat).
+      // Insert calendarMsg before it so order is: userMsg → calendarMsg → aiMsg
+      currentHistory.splice(currentHistory.length - 1, 0, calendarMsg);
+      setChatMessages((prev) => [...prev, calendarMsg, deferredCalendarAiMsg]);
+      setDeferredCalendarAiMsg(null);
+      console.log("[Calendar] Edit flow — inserted calendar badge and flushed deferred AI message");
+    } else {
+      // Initial generation flow: just append calendarMsg
+      currentHistory.push(calendarMsg);
+      setChatMessages((prev) => [...prev, calendarMsg]);
+      console.log("[Calendar] Initial gen flow — appended calendar badge to chat");
+    }
+
+    // Persist updated chatHistory
+    console.log("[Calendar] Persisting chatHistory — length:", currentHistory.length,
+      "roles:", currentHistory.map(m => m.role));
+    const patchRes = await fetch(`/api/funnel/${funnel.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatHistory: currentHistory }),
+    });
+    console.log("[Calendar] PATCH response:", patchRes.status, patchRes.ok ? "OK" : "FAILED");
+    console.log("[Calendar] Calendar flow complete — badge persisted to chatHistory");
+  }, [funnel, fetchSlots, calendarList, deferredCalendarAiMsg]);
+
+  // Helper: initialize calendar flow after generation/load
+  const initCalendarFlow = useCallback((funnelData: FunnelData, funnelId: string) => {
+    if (funnelData.hasCalendar) {
+      console.log("[Calendar] Calendar detected in funnel");
+      setHasCalendar(true);
+
+      if (funnelData.selectedCalendarId) {
+        console.log("[Calendar] Restoring previous calendar selection:", funnelData.selectedCalendarId);
+        setSelectedCalendarId(funnelData.selectedCalendarId);
+        setSelectedCalendarName(funnelData.selectedCalendarName || null);
+        setSelectedCalendarSlotDuration(funnelData.selectedCalendarSlotDuration || null);
+        if (funnelData.calendarSlots) {
+          setCalendarSlots(funnelData.calendarSlots);
+        } else {
+          fetchSlots(funnelData.selectedCalendarId, funnelId);
+        }
+      } else {
+        fetchCalendars();
+      }
+    } else {
+      setHasCalendar(false);
+    }
+  }, [fetchCalendars, fetchSlots]);
+
   const startGeneration = useCallback(
     async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>, isImageClone?: boolean) => {
       setGeneratingState("generating");
@@ -503,6 +666,9 @@ export default function GenerateResultPage() {
         setGeneratingState("idle");
         setLoading(false);
 
+        // Handle calendar detection
+        initCalendarFlow(funnelData, data.id);
+
         // Persist pre-generation messages (cancelled exchanges) to the funnel
         if (preGenMessagesRef.current.length > 0) {
           fetch(`/api/funnel/${data.id}`, {
@@ -520,6 +686,13 @@ export default function GenerateResultPage() {
 
         if (err instanceof DOMException && err.name === "AbortError") {
           setGeneratingState("aborted");
+          // Reset calendar state on abort
+          setHasCalendar(false);
+          setCalendarList([]);
+          setSelectedCalendarId(null);
+          setSelectedCalendarName(null);
+          setSelectedCalendarSlotDuration(null);
+          setCalendarSlots(null);
         } else {
           const message =
             err instanceof Error ? err.message : "Something went wrong";
@@ -530,7 +703,7 @@ export default function GenerateResultPage() {
         generateAbortRef.current = null;
       }
     },
-    [captureSnapshot]
+    [captureSnapshot, initCalendarFlow]
   );
 
   useEffect(() => {
@@ -614,6 +787,9 @@ export default function GenerateResultPage() {
               setGeneratingState("idle");
               setLoading(false);
 
+              // Handle calendar detection
+              initCalendarFlow(funnelData, genData.id);
+
               // Capture snapshot after Sandpack renders
               captureSnapshot(genData.id);
             } catch (err: unknown) {
@@ -621,6 +797,11 @@ export default function GenerateResultPage() {
               if (stepTimerRef.current) clearInterval(stepTimerRef.current);
               if (err instanceof DOMException && err.name === "AbortError") {
                 setGeneratingState("aborted");
+                setHasCalendar(false);
+                setCalendarList([]);
+                setSelectedCalendarId(null);
+                setSelectedCalendarName(null);
+                setCalendarSlots(null);
               } else {
                 const message = err instanceof Error ? err.message : "Something went wrong";
                 setError(message);
@@ -650,11 +831,16 @@ export default function GenerateResultPage() {
         if (!res.ok) throw new Error("Funnel not found");
         const data = await res.json();
         setFunnel(data);
+        console.log("[Load] chatHistory length:", (data.chatHistory || []).length,
+          "roles:", (data.chatHistory || []).map((m: ChatMessage) => m.role));
         setChatMessages(data.chatHistory || []);
         if (data.preGenHistory && data.preGenHistory.length > 0) {
           setPreGenMessages(data.preGenHistory);
         }
         setEditModel(data.model);
+
+        // Restore calendar state
+        initCalendarFlow(data, rawId);
 
         // Capture snapshot for existing projects (populates cache over time)
         if (data.files && Object.keys(data.files).length > 0) {
@@ -667,7 +853,16 @@ export default function GenerateResultPage() {
       }
     }
     loadFunnel();
-  }, [rawId, router, startGeneration, captureSnapshot]);
+  }, [rawId, router, startGeneration, captureSnapshot, initCalendarFlow]);
+
+  // Re-fetch slots when preview refreshes and calendar is selected
+  useEffect(() => {
+    if (hasCalendar && selectedCalendarId && funnel?.id && refreshKey > 0) {
+      console.log("[Calendar] Preview refreshed, re-fetching slots...");
+      fetchSlots(selectedCalendarId, funnel.id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -759,6 +954,12 @@ export default function GenerateResultPage() {
   const handleSendMessage = async () => {
     if (!chatInput.trim() || isSending || !funnel) return;
 
+    // Move deferred calendar AI message into chat history before adding new messages
+    if (deferredCalendarAiMsg) {
+      setChatMessages((prev) => [...prev, deferredCalendarAiMsg]);
+      setDeferredCalendarAiMsg(null);
+    }
+
     const userMessage = chatInput.trim();
     const imageDataUrls = chatPendingImages
       .filter((img) => !img.loading && img.dataUrl)
@@ -795,18 +996,51 @@ export default function GenerateResultPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to process edit");
 
+      console.log("[Edit] API response received — hasCalendar:", data.hasCalendar, "prevHasCalendar:", hasCalendar, "message length:", data.message?.length);
+
       const aiMsg: ChatMessage = {
         role: "assistant",
         content: data.message,
         timestamp: new Date().toISOString(),
       };
-      setChatMessages((prev) => [...prev, aiMsg]);
 
       // Reload the funnel to get updated files
       const funnelRes = await fetch(`/api/funnel/${funnel.id}`);
       if (funnelRes.ok) {
         const updatedFunnel = await funnelRes.json();
         setFunnel(updatedFunnel);
+        console.log("[Edit] Funnel reloaded — file count:", Object.keys(updatedFunnel.files || {}).length);
+      }
+
+      // Handle calendar detection from edit
+      const calendarJustAdded = data.hasCalendar !== undefined && data.hasCalendar && !hasCalendar;
+
+      if (calendarJustAdded) {
+        // Calendar was just added — defer AI message until calendar selection + slots complete
+        console.log("[Calendar] Calendar detected in edit response — deferring AI message until calendar selected");
+        setDeferredCalendarAiMsg(aiMsg);
+        setCalendarFromEdit(true);
+        setHasCalendar(true);
+        setSelectedCalendarId(null);
+        setSelectedCalendarName(null);
+        setSelectedCalendarSlotDuration(null);
+        setCalendarSlots(null);
+        fetchCalendars();
+      } else {
+        // No calendar added — show AI message immediately
+        console.log("[Edit] No calendar change — showing AI message immediately");
+        setChatMessages((prev) => [...prev, aiMsg]);
+      }
+
+      if (data.hasCalendar !== undefined && !data.hasCalendar && hasCalendar) {
+        // Calendar was removed by the edit
+        console.log("[Calendar] Calendar removed by edit — clearing calendar state");
+        setHasCalendar(false);
+        setSelectedCalendarId(null);
+        setSelectedCalendarName(null);
+        setSelectedCalendarSlotDuration(null);
+        setCalendarSlots(null);
+        setCalendarList([]);
       }
 
       setRefreshKey((prev) => prev + 1);
@@ -1434,11 +1668,82 @@ export default function GenerateResultPage() {
                     <p className="text-[14.5px] font-sans text-gray-700">{funnel.prompt}</p>
                   </div>
                 </div>
-                <div className="py-1.5">
-                  <p className="text-[14.5px] font-sans text-gray-700">
-                    I&apos;ve created your project with {fileCount} files. You can ask me to make changes — edit components, add pages, change the theme, or modify functionality.
-                  </p>
-                </div>
+
+                {/* Calendar selection cards — for initial generation (before chat messages) */}
+                {hasCalendar && !selectedCalendarId && !calendarFromEdit && (
+                  <div className="py-2">
+                    <p className="text-[14.5px] font-sans text-gray-700 mb-3">
+                      I detected a calendar/booking component in your project. Please select a calendar to connect:
+                    </p>
+                    {calendarLoading ? (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                        <span className="text-sm text-gray-500">Loading calendars...</span>
+                      </div>
+                    ) : calendarError ? (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                        <p className="text-sm text-red-600">{calendarError}</p>
+                        <button
+                          onClick={fetchCalendars}
+                          className="mt-1 text-xs text-red-500 underline hover:text-red-700"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : calendarList.length === 0 ? (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                        <p className="text-sm text-gray-500">No calendars found in your GHL account.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {calendarList.map((cal) => (
+                          <button
+                            key={cal.id}
+                            onClick={() => handleCalendarSelect(cal.id, cal.name)}
+                            className="w-full text-left rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{cal.name}</p>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+                                    {cal.calendarType}
+                                  </span>
+                                  <span className="text-xs text-gray-400">
+                                    {cal.slotDuration} min slots
+                                  </span>
+                                </div>
+                              </div>
+                              <svg className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                              </svg>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Transient "fetching slots" indicator — for initial generation */}
+                {hasCalendar && selectedCalendarId && slotsLoading && !calendarFromEdit && (
+                  <div className="py-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                      <p className="text-[14.5px] font-sans text-gray-500">Fetching available time slots...</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* "Project created" message — shown only after calendar flow completes, or immediately if no calendar */}
+                {(!hasCalendar || calendarFromEdit || (hasCalendar && selectedCalendarId && calendarSlots)) && (
+                  <div className="py-1.5">
+                    <p className="text-[14.5px] font-sans text-gray-700">
+                      I&apos;ve created your project with {fileCount} files. You can ask me to make changes — edit components, add pages, change the theme, or modify functionality.
+                    </p>
+                  </div>
+                )}
+
                 {chatMessages.map((msg, idx) => (
                   <div key={idx}>
                     {msg.role === "user" && msg.timestamp && (
@@ -1456,7 +1761,18 @@ export default function GenerateResultPage() {
                         </div>
                       </div>
                     )}
-                    {msg.role === "user" ? (
+                    {msg.role === "calendar-connected" ? (
+                      <div className="py-1.5">
+                        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                          <svg className="h-4 w-4 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <p className="text-sm text-green-700">
+                            Connected to calendar: <span className="font-medium">{msg.content}</span>
+                          </p>
+                        </div>
+                      </div>
+                    ) : msg.role === "user" ? (
                       <div className="flex justify-end">
                         <div className="max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-sm bg-white border border-gray-200">
                           <p className="text-[14.5px] font-sans text-gray-700">{msg.content}</p>
@@ -1469,6 +1785,73 @@ export default function GenerateResultPage() {
                     )}
                   </div>
                 ))}
+
+                {/* Calendar selection cards — for edit flow (after chat messages) */}
+                {hasCalendar && !selectedCalendarId && calendarFromEdit && (
+                  <div className="py-2">
+                    <p className="text-[14.5px] font-sans text-gray-700 mb-3">
+                      I detected a calendar/booking component in your project. Please select a calendar to connect:
+                    </p>
+                    {calendarLoading ? (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                        <span className="text-sm text-gray-500">Loading calendars...</span>
+                      </div>
+                    ) : calendarError ? (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                        <p className="text-sm text-red-600">{calendarError}</p>
+                        <button
+                          onClick={fetchCalendars}
+                          className="mt-1 text-xs text-red-500 underline hover:text-red-700"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : calendarList.length === 0 ? (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                        <p className="text-sm text-gray-500">No calendars found in your GHL account.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {calendarList.map((cal) => (
+                          <button
+                            key={cal.id}
+                            onClick={() => handleCalendarSelect(cal.id, cal.name)}
+                            className="w-full text-left rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">{cal.name}</p>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+                                    {cal.calendarType}
+                                  </span>
+                                  <span className="text-xs text-gray-400">
+                                    {cal.slotDuration} min slots
+                                  </span>
+                                </div>
+                              </div>
+                              <svg className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                              </svg>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Transient "fetching slots" indicator — for edit flow */}
+                {hasCalendar && selectedCalendarId && slotsLoading && calendarFromEdit && (
+                  <div className="py-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                      <p className="text-[14.5px] font-sans text-gray-500">Fetching available time slots...</p>
+                    </div>
+                  </div>
+                )}
+
                 {isSending && (
                   <div className="py-1.5">
                     <div>
@@ -1723,8 +2106,37 @@ export default function GenerateResultPage() {
             </div>
           )}
 
+          {/* ── Calendar blocking overlay — waiting for calendar selection ── */}
+          {isReady && projectFiles && viewMode === "preview" && (isCalendarBlocking || isCalendarSlotsLoading) && (
+            <div className="relative w-full h-full rounded-2xl border border-gray-200 bg-white shadow-lg overflow-hidden flex items-center justify-center">
+              <div className="flex flex-col items-center gap-4 text-center px-6">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
+                  <svg className="h-7 w-7 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                  </svg>
+                </div>
+                {slotsLoading ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                      <p className="text-base font-medium text-gray-700">Fetching available time slots...</p>
+                    </div>
+                    <p className="text-sm text-gray-400">This will just take a moment</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-base font-medium text-gray-700">Select a calendar</p>
+                    <p className="text-sm text-gray-400">
+                      Your project includes a booking component. Select a calendar from the chat panel to continue.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── Ready state - Preview mode (Sandpack) ── */}
-          {isReady && projectFiles && viewMode === "preview" && (
+          {isReady && projectFiles && viewMode === "preview" && !isCalendarBlocking && !isCalendarSlotsLoading && (
             <>
               <div
                 className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-lg transition-all duration-300"
@@ -1735,7 +2147,16 @@ export default function GenerateResultPage() {
                   maxHeight: "100%",
                 }}
               >
-                <ReactProjectPreview files={projectFiles} refreshKey={refreshKey} startRoute={currentPage} />
+                <ReactProjectPreview
+                  files={projectFiles}
+                  refreshKey={refreshKey}
+                  startRoute={currentPage}
+                  calendarData={calendarSlots && selectedCalendarId ? {
+                    slots: calendarSlots,
+                    slotDuration: selectedCalendarSlotDuration || 30,
+                    calendarId: selectedCalendarId,
+                  } : null}
+                />
               </div>
               {device !== "desktop" && (
                 <p className="mt-3 text-xs text-gray-400">

@@ -8,10 +8,17 @@ import {
 } from "@codesandbox/sandpack-react";
 import { useMemo, Component, type ReactNode } from "react";
 
+interface CalendarData {
+  slots: Record<string, string[]>;
+  slotDuration: number;
+  calendarId: string;
+}
+
 interface ReactProjectPreviewProps {
   files: Record<string, string>;
   refreshKey?: number;
   startRoute?: string;
+  calendarData?: CalendarData | null;
 }
 
 // ── Error boundary to catch Sandpack crashes gracefully ──
@@ -170,6 +177,69 @@ img[src="about:blank"] {
 }
 `;
 
+// Calendar + booking form responsive safety net.
+// Uses CSS :has() to structurally target calendar layouts by detecting a 7-column grid
+// (grid-cols-7) and force responsive stacking via @media queries.
+// Injected only when calendarData is present.
+const CALENDAR_RESPONSIVE_STYLES = `
+/* Calendar + booking form responsive safety net */
+@media (max-width: 640px) {
+  /* Force calendar+form side-by-side layouts to stack vertically.
+     Targets any flex container that has a 7-column calendar grid descendant. */
+  .flex:has(.grid-cols-7) {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  /* Make direct children full-width when stacked */
+  .flex:has(.grid-cols-7) > * {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: none !important;
+  }
+  /* Grid-based calendar+form layouts: single column on mobile */
+  .grid:has(.grid-cols-7):not(.grid-cols-7) {
+    grid-template-columns: 1fr !important;
+  }
+  [class*="grid-cols"]:has(.grid-cols-7):not(.grid-cols-7) {
+    grid-template-columns: 1fr !important;
+  }
+  /* Grid children: full width when stacked */
+  .grid:has(.grid-cols-7):not(.grid-cols-7) > *,
+  [class*="grid-cols"]:has(.grid-cols-7):not(.grid-cols-7) > * {
+    grid-column: 1 / -1 !important;
+  }
+}
+`;
+
+// Pre-built useCalendarData hook injected into Sandpack when calendar data is available.
+// This provides real GHL slot data to LLM-generated calendar UI components.
+const CALENDAR_DATA_HOOK = `export interface CalendarData {
+  slots: Record<string, string[]>;
+  slotDuration: number;
+  calendarId: string;
+}
+
+export function useCalendarData(): CalendarData | null {
+  return (window as any).__CALENDAR_DATA__ || null;
+}
+
+// Format a local date as "YYYY-MM-DD" for slot key lookup.
+// month is 0-indexed (0 = Jan, 11 = Dec), same as Date.getMonth().
+// NEVER use new Date().toISOString() — it converts to UTC which shifts the date ±1 day.
+export function formatDateKey(year: number, month: number, day: number): string {
+  return \`\${year}-\${String(month + 1).padStart(2, '0')}-\${String(day).padStart(2, '0')}\`;
+}
+
+// Convert 24h time string (e.g. "14:30") to 12h format (e.g. "2:30 PM").
+export function formatSlotTime(time: string): string {
+  const [h, m] = time.split(':');
+  const hour = parseInt(h, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  return \`\${displayHour}:\${m} \${period}\`;
+}
+`;
+
 // Transform CSS to work with Tailwind CDN
 function transformCssForCdn(css: string): string {
   let result = css;
@@ -201,11 +271,21 @@ function transformCssForCdn(css: string): string {
   return result;
 }
 
-// Names that are NOT lucide icons — common React/router/built-in components
+// Names that are NOT lucide icons — common React/router/built-in components & JS globals
 const NON_ICON_NAMES = new Set([
+  // React & Router
   "React", "Fragment", "Suspense", "StrictMode",
   "Link", "NavLink", "Route", "Routes", "HashRouter", "BrowserRouter", "Outlet", "Navigate",
   "ScrollToTop",
+  // JS/TS built-in globals & types (commonly appear in generics like useState<Date>)
+  "Date", "Map", "Set", "Array", "Object", "Error", "Promise", "RegExp",
+  "String", "Number", "Boolean", "Symbol", "Function", "Proxy", "Reflect",
+  "WeakMap", "WeakSet", "JSON", "Math", "Intl",
+  // Web API globals
+  "URL", "Headers", "Request", "Response", "FormData", "File", "Blob",
+  "Event", "Node", "Element", "Document", "Window", "Image",
+  // TypedArrays
+  "Int8Array", "Uint8Array", "Float32Array", "Float64Array", "BigInt",
 ]);
 
 /**
@@ -310,6 +390,7 @@ export default function ReactProjectPreview({
   files,
   refreshKey,
   startRoute,
+  calendarData,
 }: ReactProjectPreviewProps) {
   const { sandpackFiles, dependencies, externalResources } = useMemo(() => {
     const sfFiles: Record<string, { code: string; hidden?: boolean }> = {};
@@ -393,7 +474,7 @@ export default function ReactProjectPreview({
 
       if (normalizedPath === "/src/index.css") {
         hasIndexCss = true;
-        sfFiles[normalizedPath] = { code: transformCssForCdn(code) + SELECT_BASE_STYLES + BROKEN_IMAGE_STYLES };
+        sfFiles[normalizedPath] = { code: transformCssForCdn(code) + SELECT_BASE_STYLES + BROKEN_IMAGE_STYLES + (calendarData ? CALENDAR_RESPONSIVE_STYLES : "") };
         continue;
       }
 
@@ -410,6 +491,59 @@ export default function ReactProjectPreview({
     for (const pkg of importedPackages) {
       if (!deps[pkg]) {
         deps[pkg] = "latest";
+      }
+    }
+
+    // Inject pre-built useCalendarData hook when calendar data is available.
+    // This provides real GHL slot data to LLM-generated calendar UI components.
+    if (calendarData) {
+      // Always inject the hook file
+      sfFiles["/src/hooks/useCalendarData.ts"] = {
+        code: CALENDAR_DATA_HOOK,
+        hidden: true,
+      };
+
+      // Fallback: if Gemini didn't import useCalendarData anywhere, force-inject it.
+      // Find the most likely calendar-related file and add the import + usage.
+      const anyFileImportsIt = Object.values(sfFiles).some(
+        (f) => f.code.includes("useCalendarData")
+      );
+      if (!anyFileImportsIt) {
+        // Find the best candidate file: a calendar/booking page or component
+        const calendarFilePattern = /calendar|booking|appointment|schedule/i;
+        let targetPath: string | null = null;
+        // Prefer pages over components
+        for (const fp of Object.keys(sfFiles)) {
+          if (/\.(tsx|jsx)$/.test(fp) && calendarFilePattern.test(fp)) {
+            targetPath = fp;
+            if (fp.includes("/pages/")) break; // prefer page files
+          }
+        }
+        if (targetPath) {
+          const file = sfFiles[targetPath];
+          // Compute relative import path from the target file to /src/hooks/useCalendarData
+          const depth = targetPath.split("/").length - 1; // e.g. /src/pages/Booking.tsx = 3 parts after split
+          const relPrefix = depth > 3 ? "../".repeat(depth - 3) + "../hooks/" : "../hooks/";
+          const importLine = `import { useCalendarData, formatSlotTime } from "${relPrefix}useCalendarData";\n`;
+          let code = file.code;
+          if (!code.includes("useCalendarData")) {
+            // Add import after last import statement
+            const lastImportIdx = code.lastIndexOf("import ");
+            if (lastImportIdx !== -1) {
+              const endOfImport = code.indexOf("\n", lastImportIdx);
+              code = code.slice(0, endOfImport + 1) + importLine + code.slice(endOfImport + 1);
+            } else {
+              code = importLine + code;
+            }
+            // Inject hook call at the top of the default export function body
+            const fnMatch = code.match(/export\s+default\s+function\s+\w+\s*\([^)]*\)\s*\{/);
+            if (fnMatch && fnMatch.index !== undefined) {
+              const insertPos = fnMatch.index + fnMatch[0].length;
+              code = code.slice(0, insertPos) + "\n  const calendarData = useCalendarData();" + code.slice(insertPos);
+            }
+            sfFiles[targetPath] = { ...file, code };
+          }
+        }
       }
     }
 
@@ -639,6 +773,13 @@ document.addEventListener("submit", function(e) {
   }
 });`);
 
+    // Inject calendar data into iframe global so generated calendar components can read it
+    if (calendarData) {
+      bridgeLines.push(`window.__CALENDAR_DATA__ = ${JSON.stringify(calendarData)};`);
+    } else {
+      bridgeLines.push(`window.__CALENDAR_DATA__ = null;`);
+    }
+
     bridgeLines.push('export { default } from "./src/App";');
 
     sfFiles["/App.tsx"] = {
@@ -651,7 +792,7 @@ document.addEventListener("submit", function(e) {
       dependencies: deps,
       externalResources: extResources,
     };
-  }, [files, startRoute]);
+  }, [files, startRoute, calendarData]);
 
   return (
     <SandpackErrorBoundary refreshKey={refreshKey}>

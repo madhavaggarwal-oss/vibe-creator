@@ -119,11 +119,20 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
 
-    // Save updated funnel
+    console.log(`[Chat API] hasCalendar: ${result.hasCalendar}`);
+
+    // Save updated funnel with calendar detection state
     await saveFunnel({
       ...funnel,
       files: finalFiles,
       chatHistory,
+      hasCalendar: result.hasCalendar,
+      // If calendar was removed by the edit, clear calendar selection
+      ...(!result.hasCalendar && funnel.hasCalendar ? {
+        selectedCalendarId: undefined,
+        selectedCalendarName: undefined,
+        calendarSlots: undefined,
+      } : {}),
     });
 
     // Invalidate cached snapshot so it gets re-captured
@@ -136,6 +145,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       message: result.message,
       changedFiles: Object.keys(result.files),
+      hasCalendar: result.hasCalendar,
     });
   } catch (error: unknown) {
     // If the client disconnected (abort), return silently

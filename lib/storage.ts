@@ -18,7 +18,7 @@ export interface FunnelPage {
 }
 
 export interface ChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "calendar-connected";
   content: string;
   timestamp: string;
   images?: string[];
@@ -30,6 +30,14 @@ export interface PendingImageEntry {
   description: string;    // Full description (not truncated)
   width: number;
   height: number;
+}
+
+export interface GHLCalendar {
+  id: string;
+  name: string;
+  calendarType: string;
+  slotDuration: number;
+  description?: string;
 }
 
 export interface Funnel {
@@ -45,6 +53,11 @@ export interface Funnel {
   chatHistory: ChatMessage[];
   preGenHistory?: ChatMessage[];
   createdAt: string;
+  hasCalendar?: boolean;
+  selectedCalendarId?: string;
+  selectedCalendarName?: string;
+  selectedCalendarSlotDuration?: number;
+  calendarSlots?: Record<string, string[]>;
 }
 
 /**

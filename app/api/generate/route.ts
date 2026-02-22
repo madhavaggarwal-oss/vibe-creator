@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     // call is actually cancelled when the client disconnects (not just ignored).
     // This prevents a zombie first-generation from consuming API quota when the
     // user aborts and retries with a new prompt.
-    const files = await generateFunnel(
+    const { files, hasCalendar } = await generateFunnel(
       prompt.trim(),
       modelId,
       imageList.length > 0 ? imageList : undefined,
@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
       request.signal,
       !!isImageClone
     );
+
+    console.log(`[Generate API] hasCalendar: ${hasCalendar}`);
 
     // Double-check: if client disconnected while Gemini was finishing, don't save
     if (request.signal.aborted) {
@@ -55,6 +57,7 @@ export async function POST(request: NextRequest) {
       model: modelId,
       pages: [] as { title: string; slug: string; html: string }[],
       files,
+      hasCalendar,
       chatHistory: [],
       createdAt: new Date().toISOString(),
     };
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       id,
       fileCount: Object.keys(files).length,
+      hasCalendar,
     });
   } catch (error: unknown) {
     // If the client disconnected (abort), return silently
