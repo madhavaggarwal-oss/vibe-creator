@@ -6,7 +6,7 @@ import {
   SandpackPreview,
   useSandpack,
 } from "@codesandbox/sandpack-react";
-import { useMemo, Component, type ReactNode } from "react";
+import { useMemo, useEffect, useRef, useState, useCallback, Component, type ReactNode } from "react";
 
 interface CalendarData {
   slots: Record<string, string[]>;
@@ -19,6 +19,8 @@ interface ReactProjectPreviewProps {
   refreshKey?: number;
   startRoute?: string;
   calendarData?: CalendarData | null;
+  funnelId?: string;
+  onRepair?: (files: Record<string, string>) => void;
 }
 
 // ── Error boundary to catch Sandpack crashes gracefully ──
@@ -78,19 +80,11 @@ class SandpackErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryS
   }
 }
 
-// ── Compile error overlay — replaces Sandpack's confusing default ──
-// Must be rendered inside SandpackProvider to use useSandpack().
-function CompileErrorOverlay() {
-  const { sandpack } = useSandpack();
-  const rawError = sandpack.error;
-
-  if (!rawError) return null;
-
-  // Extract a meaningful message from Sandpack's error
-  let errorMessage = rawError.message || "Unknown compilation error";
+// ── Parse Sandpack error message into a clean message + file path ──
+function parseSandpackError(rawMessage: string): { errorMessage: string; filePath: string | null } {
+  let errorMessage = rawMessage || "Unknown compilation error";
 
   // Sandpack wraps SyntaxErrors with "Cannot assign to read only property 'message'"
-  // — extract the actual SyntaxError from inside
   const readOnlyMatch = errorMessage.match(
     /Cannot assign to read only property 'message' of object '([^']+)'/
   );
@@ -98,12 +92,148 @@ function CompileErrorOverlay() {
     errorMessage = readOnlyMatch[1];
   }
 
-  // Extract file path and location from SyntaxError
+  // Extract file path from patterns like "/src/components/Hero.tsx: Unexpected token (46:11)"
+  let filePath: string | null = null;
+  const filePathMatch = errorMessage.match(/^(\/src\/[^:]+):\s*/);
+  if (filePathMatch) {
+    filePath = filePathMatch[1];
+    errorMessage = errorMessage.slice(filePathMatch[0].length);
+  }
+
+  // Clean up "SyntaxError:" prefix
   const syntaxMatch = errorMessage.match(/SyntaxError:\s*(.+)/);
   if (syntaxMatch) {
     errorMessage = syntaxMatch[1];
   }
 
+  return { errorMessage, filePath };
+}
+
+// ── Auto-repair overlay — detects compilation errors and attempts LLM fix ──
+// Must be rendered inside SandpackProvider to use useSandpack().
+function AutoRepairOverlay({
+  funnelId,
+  onRepair,
+  refreshKey,
+}: {
+  funnelId?: string;
+  onRepair?: (files: Record<string, string>) => void;
+  refreshKey?: number;
+}) {
+  const { sandpack } = useSandpack();
+  const rawError = sandpack.error;
+
+  const [repairing, setRepairing] = useState(false);
+  const [repairFailed, setRepairFailed] = useState(false);
+  const attemptedErrors = useRef<Set<string>>(new Set());
+  const repairInFlight = useRef(false);
+  const distinctErrorCount = useRef(0);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Reset guards when refreshKey changes (user action / new files loaded)
+  const prevRefreshKey = useRef(refreshKey);
+  if (refreshKey !== prevRefreshKey.current) {
+    prevRefreshKey.current = refreshKey;
+    attemptedErrors.current.clear();
+    distinctErrorCount.current = 0;
+    setRepairFailed(false);
+    setRepairing(false);
+  }
+
+  const attemptRepair = useCallback(
+    async (errorMsg: string, filePath: string | null) => {
+      if (!funnelId || !onRepair) return;
+      if (repairInFlight.current) return;
+      if (distinctErrorCount.current >= 2) return;
+
+      const errorKey = `${filePath || "?"}::${errorMsg}`;
+      if (attemptedErrors.current.has(errorKey)) {
+        setRepairFailed(true);
+        return;
+      }
+      attemptedErrors.current.add(errorKey);
+      distinctErrorCount.current++;
+
+      repairInFlight.current = true;
+      setRepairing(true);
+      setRepairFailed(false);
+
+      try {
+        const res = await fetch(`/api/funnel/${funnelId}/repair`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filePath: filePath || "/src/App.tsx",
+            errorMessage: errorMsg,
+          }),
+        });
+
+        if (!res.ok) {
+          setRepairFailed(true);
+          return;
+        }
+
+        const data = await res.json();
+        if (data.fixed && data.files) {
+          onRepair(data.files);
+          // Don't set repairFailed — the parent will update files and refreshKey
+          return;
+        }
+
+        setRepairFailed(true);
+      } catch {
+        setRepairFailed(true);
+      } finally {
+        repairInFlight.current = false;
+        setRepairing(false);
+      }
+    },
+    [funnelId, onRepair]
+  );
+
+  // Trigger repair when a new error appears (debounced)
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+    if (!rawError) {
+      setRepairing(false);
+      setRepairFailed(false);
+      return;
+    }
+
+    if (!funnelId || !onRepair) return;
+
+    const { errorMessage, filePath } = parseSandpackError(rawError.message || "");
+
+    debounceTimer.current = setTimeout(() => {
+      attemptRepair(errorMessage, filePath);
+    }, 500);
+
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [rawError, funnelId, onRepair, attemptRepair]);
+
+  if (!rawError) return null;
+
+  const { errorMessage } = parseSandpackError(rawError.message || "");
+
+  // Show "Fixing..." while repair is in flight
+  if (repairing) {
+    return (
+      <div className="absolute inset-0 z-10 flex items-center justify-center bg-white p-8">
+        <div className="flex flex-col items-center gap-4 text-center max-w-md">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800">Auto-fixing compilation error...</h3>
+            <p className="mt-1 text-xs text-gray-500">This usually takes a few seconds</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show static error UI (fallback when repair failed or not available)
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center bg-white p-8">
       <div className="flex flex-col items-center gap-4 text-center max-w-md">
@@ -119,7 +249,9 @@ function CompileErrorOverlay() {
           </p>
         </div>
         <p className="text-xs text-gray-400">
-          Try asking the AI to fix this error, or edit the code directly.
+          {repairFailed
+            ? "Auto-fix couldn\u2019t resolve this. Try asking the AI to fix it, or edit the code directly."
+            : "Try asking the AI to fix this error, or edit the code directly."}
         </p>
       </div>
     </div>
@@ -294,7 +426,7 @@ const NON_ICON_NAMES = new Set([
  * Detect PascalCase JSX components used but not imported in a TSX file.
  * If unresolved names are found and lucide-react is available, inject the import.
  */
-function fixMissingLucideImports(code: string, hasLucideDep: boolean): string {
+function fixMissingLucideImports(code: string, hasLucideDep: boolean, projectComponents?: Set<string>): string {
   if (!hasLucideDep) return code;
 
   // Find all PascalCase JSX tags: <ComponentName or <ComponentName> or <ComponentName />
@@ -306,6 +438,8 @@ function fixMissingLucideImports(code: string, hasLucideDep: boolean): string {
   }
 
   if (usedComponents.size === 0) return code;
+
+  console.log("[lucide-fix]   PascalCase JSX tags found:", [...usedComponents]);
 
   // Find all imported/defined names
   const importedNames = new Set<string>();
@@ -339,12 +473,24 @@ function fixMissingLucideImports(code: string, hasLucideDep: boolean): string {
     importedNames.add(m[1]);
   }
 
+  console.log("[lucide-fix]   Imported/defined in-file:", [...importedNames]);
+
   // Unresolved = used in JSX but not imported/defined and not a known non-icon
+  const skippedAsProjectComponent = [...usedComponents].filter(
+    (name) => !importedNames.has(name) && !NON_ICON_NAMES.has(name) && projectComponents?.has(name)
+  );
+  if (skippedAsProjectComponent.length > 0) {
+    console.log("[lucide-fix]   Skipped (project components, not icons):", skippedAsProjectComponent);
+  }
   const unresolved = [...usedComponents].filter(
-    (name) => !importedNames.has(name) && !NON_ICON_NAMES.has(name)
+    (name) => !importedNames.has(name) && !NON_ICON_NAMES.has(name) && !projectComponents?.has(name)
   );
 
-  if (unresolved.length === 0) return code;
+  if (unresolved.length === 0) {
+    console.log("[lucide-fix]   No unresolved icons — skipping");
+    return code;
+  }
+  console.log("[lucide-fix]   Injecting as lucide icons:", unresolved);
 
   // Check if there's already a lucide-react import to extend
   const existingLucide = code.match(/import\s*\{([^}]+)\}\s*from\s*['"]lucide-react['"]/);
@@ -393,6 +539,8 @@ export default function ReactProjectPreview({
   refreshKey,
   startRoute,
   calendarData,
+  funnelId,
+  onRepair,
 }: ReactProjectPreviewProps) {
   const { sandpackFiles, dependencies, externalResources } = useMemo(() => {
     const sfFiles: Record<string, { code: string; hidden?: boolean }> = {};
@@ -549,21 +697,37 @@ export default function ReactProjectPreview({
       }
     }
 
+    // Collect all component names defined across all project files so we don't
+    // mistake cross-file component references (e.g. <HeroSection />) for lucide icons.
+    const projectDefinedComponents = new Set<string>();
+    for (const [fp, fObj] of Object.entries(sfFiles)) {
+      if (!/\.(tsx|jsx)$/.test(fp)) continue;
+      const defRx = /(?:export\s+default\s+)?(?:function|const|let|var|class)\s+([A-Z][A-Za-z0-9]+)/g;
+      let dm;
+      while ((dm = defRx.exec(fObj.code)) !== null) {
+        projectDefinedComponents.add(dm[1]);
+      }
+    }
+    console.log("[lucide-fix] Project-defined components:", [...projectDefinedComponents]);
+
     // Fix missing lucide-react imports: AI often uses icon components like <Scissors>
     // without importing them. Detect unresolved PascalCase JSX and inject imports.
     const hasLucideDep = !!deps["lucide-react"];
+    console.log("[lucide-fix] hasLucideDep:", hasLucideDep);
     let lucideWasInjected = false;
     for (const [filePath, fileObj] of Object.entries(sfFiles)) {
       if (!/\.(tsx|jsx)$/.test(filePath)) continue;
-      const fixed = fixMissingLucideImports(fileObj.code, hasLucideDep || true);
+      const fixed = fixMissingLucideImports(fileObj.code, true, projectDefinedComponents);
       if (fixed !== fileObj.code) {
         sfFiles[filePath] = { ...fileObj, code: fixed };
         lucideWasInjected = true;
+        console.log("[lucide-fix] Injected lucide imports in:", filePath);
       }
     }
     // If we injected lucide imports but lucide-react wasn't a dep, add it
     if (lucideWasInjected && !deps["lucide-react"]) {
       deps["lucide-react"] = "latest";
+      console.log("[lucide-fix] Auto-added lucide-react dependency");
     }
 
     // Bridge App.tsx: imports CSS, scrolls to top on navigation, optionally navigates to a route, re-exports App
@@ -991,7 +1155,7 @@ document.addEventListener("submit", function(e) {
         }}
       >
         <div className="relative" style={{ height: "100%" }}>
-          <CompileErrorOverlay />
+          <AutoRepairOverlay funnelId={funnelId} onRepair={onRepair} refreshKey={refreshKey} />
           <SandpackLayout
             style={{
               height: "100%",

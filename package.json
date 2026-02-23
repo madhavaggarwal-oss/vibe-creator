@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@babel/parser": "^7.26.0",
     "@codesandbox/sandpack-react": "^2.20.0",
     "@google/genai": "^1.41.0",
     "@google/generative-ai": "^0.24.1",

@@ -415,6 +415,13 @@ export default function GenerateResultPage() {
     }, 4000);
   }, []);
 
+  // Auto-repair handler — called by ReactProjectPreview when Sandpack compilation
+  // error is automatically fixed by the LLM repair API
+  const handleAutoRepair = useCallback((repairedFiles: Record<string, string>) => {
+    setFunnel((prev) => (prev ? { ...prev, files: repairedFiles } : prev));
+    setRefreshKey((k) => k + 1);
+  }, []);
+
   // GHL form submission handler — listens for form data from Sandpack iframe
   useEffect(() => {
     const handleGhlFormSubmit = async (e: MessageEvent) => {
@@ -2253,6 +2260,8 @@ export default function GenerateResultPage() {
                     slotDuration: selectedCalendarSlotDuration || 30,
                     calendarId: selectedCalendarId,
                   } : null}
+                  funnelId={funnel?.id}
+                  onRepair={handleAutoRepair}
                 />
               </div>
               {device !== "desktop" && (

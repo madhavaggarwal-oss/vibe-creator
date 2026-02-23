@@ -6,10 +6,14 @@ import { validateAndRepairFiles } from "./syntax-repair";
 
 function imagesToParts(images: string[]): Part[] {
   return images.map((dataUrl) => {
-    const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
-    const mimeType = match?.[1] || "image/jpeg";
-    const data = match?.[2] || dataUrl;
-    return { inlineData: { mimeType, data } };
+    const commaIndex = dataUrl.indexOf(",");
+    if (commaIndex !== -1 && dataUrl.startsWith("data:")) {
+      const meta = dataUrl.substring(5, commaIndex);
+      const mimeType = meta.split(";")[0];
+      const data = dataUrl.substring(commaIndex + 1);
+      return { inlineData: { mimeType, data } };
+    }
+    return { inlineData: { mimeType: "image/jpeg", data: dataUrl } };
   });
 }
 

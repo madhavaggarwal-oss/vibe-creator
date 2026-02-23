@@ -1,6 +1,89 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // ---------------------------------------------------------------------------
+// Tier 1.5 — AST parse validation (catches errors invisible to bracket analysis)
+// ---------------------------------------------------------------------------
+
+/**
+ * Attempt to parse code as TSX/JSX using @babel/parser.
+ * Returns `null` if the code parses successfully, or an error message string
+ * (including line/column) if parsing fails.
+ *
+ * This catches the same errors Sandpack's bundler would catch (malformed JSX,
+ * invalid operators, missing tokens, etc.) — errors that the bracket-counting
+ * analyzer in Tier 1 cannot detect.
+ */
+export function tryParseTSX(code: string): string | null {
+  try {
+    // Dynamic require so that if @babel/parser is somehow missing,
+    // we degrade gracefully instead of crashing the whole module.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parse } = require("@babel/parser") as typeof import("@babel/parser");
+
+    parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+      errorRecovery: false,
+    });
+
+    return null; // parses cleanly
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "message" in err) {
+      return (err as Error).message;
+    }
+    return "Unknown parse error";
+  }
+}
+
+/**
+ * Run AST validation on a code string and, if it fails, use the LLM to fix it.
+ * Allows up to `maxAttempts` LLM retries. Returns the best version of the code.
+ */
+export async function astValidateAndRepair(
+  code: string,
+  filename: string,
+  maxAttempts: number = 2
+): Promise<string> {
+  let current = code;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const parseError = tryParseTSX(current);
+    if (parseError === null) {
+      if (attempt > 1) {
+        console.warn(`[syntax-repair] AST parse: ${filename} fixed on LLM attempt ${attempt - 1}`);
+      }
+      return current;
+    }
+
+    console.warn(
+      `[syntax-repair] AST parse: ${filename} failed (attempt ${attempt}/${maxAttempts}): ${parseError}`
+    );
+
+    const fixed = await llmFixFile(current, filename, parseError);
+
+    // If the LLM returned the same code, no point retrying
+    if (fixed === current) {
+      console.warn(`[syntax-repair] AST parse: ${filename} LLM returned identical code, stopping`);
+      break;
+    }
+
+    current = fixed;
+  }
+
+  // Final check — if the last attempt still fails, log it
+  const finalError = tryParseTSX(current);
+  if (finalError !== null) {
+    console.warn(
+      `[syntax-repair] AST parse: ${filename} still has errors after ${maxAttempts} LLM attempt(s): ${finalError}`
+    );
+  } else {
+    console.warn(`[syntax-repair] AST parse: ${filename} fixed after LLM repair`);
+  }
+
+  return current;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -468,6 +551,8 @@ export async function validateAndRepairFiles(
     path: string;
     code: string;
     issues: string;
+    /** true when queued from Tier 1.5 (AST error only, no bracket issues) */
+    astOnly?: boolean;
   }> = [];
 
   for (const [path, content] of Object.entries(files)) {
@@ -482,7 +567,16 @@ export async function validateAndRepairFiles(
 
     const issues = analyzeSyntax(preFixed);
     if (issues.length === 0) {
-      result[path] = preFixed;
+      // Tier 1.5: bracket analysis says clean — verify with AST parse
+      const parseError = tryParseTSX(preFixed);
+      if (parseError !== null) {
+        console.warn(`[syntax-repair] AST parse: ${path} has parse error despite clean bracket analysis: ${parseError}`);
+        // Queue for AST-guided LLM repair
+        llmTasks.push({ path, code: preFixed, issues: parseError, astOnly: true });
+        result[path] = preFixed; // placeholder; will be overwritten by LLM result
+      } else {
+        result[path] = preFixed;
+      }
       continue;
     }
 
@@ -494,8 +588,16 @@ export async function validateAndRepairFiles(
     const { code: repaired, remainingIssues } = attemptLocalRepair(preFixed);
 
     if (remainingIssues.length === 0) {
-      console.warn(`[syntax-repair] ${path}: local repair fixed all issues`);
-      result[path] = repaired;
+      console.warn(`[syntax-repair] ${path}: local repair fixed all bracket issues`);
+      // Tier 1.5: verify with AST parse
+      const parseError = tryParseTSX(repaired);
+      if (parseError !== null) {
+        console.warn(`[syntax-repair] AST parse: ${path} still has parse error after local repair: ${parseError}`);
+        llmTasks.push({ path, code: repaired, issues: parseError, astOnly: true });
+        result[path] = repaired;
+      } else {
+        result[path] = repaired;
+      }
       continue;
     }
 
@@ -514,20 +616,31 @@ export async function validateAndRepairFiles(
     });
   }
 
-  // Tier 2: run LLM repairs in parallel
+  // Tier 2 / Tier 1.5: run LLM repairs in parallel
   if (llmTasks.length > 0) {
     console.warn(`[syntax-repair] Running LLM repair on ${llmTasks.length} file(s)...`);
     const llmResults = await Promise.all(
-      llmTasks.map(async ({ path, code, issues }) => {
-        const fixed = await llmFixFile(code, path, issues);
-        // Verify the LLM fix actually resolved the issues
-        const postFixIssues = analyzeSyntax(fixed);
-        if (postFixIssues.length < analyzeSyntax(code).length) {
-          console.warn(`[syntax-repair] ${path}: LLM repair improved file (${postFixIssues.length} issues remaining)`);
+      llmTasks.map(async ({ path, code, issues, astOnly }) => {
+        if (astOnly) {
+          // Tier 1.5 path: AST-guided LLM repair with retry loop
+          const fixed = await astValidateAndRepair(code, path);
           return { path, code: fixed };
         }
-        console.warn(`[syntax-repair] ${path}: LLM repair did not improve, keeping local repair`);
-        return { path, code };
+
+        // Tier 2 path: bracket-based LLM repair, then AST validation
+        const fixed = await llmFixFile(code, path, issues);
+        // Verify the LLM fix resolved bracket issues
+        const postFixIssues = analyzeSyntax(fixed);
+        if (postFixIssues.length < analyzeSyntax(code).length) {
+          console.warn(`[syntax-repair] ${path}: LLM repair improved file (${postFixIssues.length} bracket issues remaining)`);
+          // Also run AST validation on the LLM-fixed code
+          const astFixed = await astValidateAndRepair(fixed, path);
+          return { path, code: astFixed };
+        }
+        console.warn(`[syntax-repair] ${path}: LLM repair did not improve brackets, trying AST repair on local version`);
+        // Even if bracket repair didn't help, try AST validation
+        const astFixed = await astValidateAndRepair(code, path);
+        return { path, code: astFixed };
       })
     );
 

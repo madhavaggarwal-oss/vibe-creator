@@ -94,9 +94,12 @@ export function extractMimeAndBase64(dataUrl: string): {
   mimeType: string;
   base64: string;
 } {
-  const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
-  if (!match) {
-    return { mimeType: "image/jpeg", base64: dataUrl };
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex !== -1 && dataUrl.startsWith("data:")) {
+    const meta = dataUrl.substring(5, commaIndex);
+    const mimeType = meta.split(";")[0];
+    const base64 = dataUrl.substring(commaIndex + 1);
+    return { mimeType, base64 };
   }
-  return { mimeType: match[1], base64: match[2] };
+  return { mimeType: "image/jpeg", base64: dataUrl };
 }
