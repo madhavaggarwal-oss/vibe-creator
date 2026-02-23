@@ -21,6 +21,37 @@ hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("json", json);
 
+/** Play a short two-tone chime using Web Audio API to signal generation complete. */
+function playChime() {
+  try {
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+
+    // Two-note chime: C5 then E5
+    const notes = [
+      { freq: 523.25, start: 0, dur: 0.15 },
+      { freq: 659.25, start: 0.15, dur: 0.25 },
+    ];
+
+    for (const { freq, start, dur } of notes) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur);
+    }
+
+    // Clean up context after notes finish
+    setTimeout(() => ctx.close(), 600);
+  } catch {
+    // Audio not available — ignore silently
+  }
+}
+
 // Dynamically import Sandpack to avoid SSR issues
 const ReactProjectPreview = dynamic(
   () => import("@/components/react-preview"),
@@ -756,6 +787,7 @@ export default function GenerateResultPage() {
         setEditModel(funnelData.model);
         setGeneratingState("idle");
         setLoading(false);
+        playChime();
 
         // Handle calendar detection
         initCalendarFlow(funnelData, data.id);
@@ -877,6 +909,7 @@ export default function GenerateResultPage() {
               setEditModel(funnelData.model);
               setGeneratingState("idle");
               setLoading(false);
+              playChime();
 
               // Handle calendar detection
               initCalendarFlow(funnelData, genData.id);
