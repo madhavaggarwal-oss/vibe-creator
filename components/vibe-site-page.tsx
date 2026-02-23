@@ -216,7 +216,7 @@ export default function VibeSitePage() {
 
           {/* Heading */}
           <h1 className="mb-8 text-3xl font-bold text-gray-800 tracking-tight text-center">
-            What&apos;s on your mind?
+            What&apos;s on your mind, Varun?
           </h1>
 
           {/* Prompt Input Card */}
