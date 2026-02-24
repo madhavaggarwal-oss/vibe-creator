@@ -534,6 +534,71 @@ function fixRouterImports(code: string): string {
   return result;
 }
 
+// Known react-router-dom exports that AI code commonly uses without importing
+const ROUTER_COMPONENTS = new Set([
+  "Link", "NavLink", "Route", "Routes", "Outlet", "Navigate",
+  "HashRouter", "BrowserRouter", "MemoryRouter",
+  "useNavigate", "useLocation", "useParams", "useSearchParams",
+]);
+
+/**
+ * Detect react-router-dom components/hooks used in code but not imported.
+ * Auto-injects the missing import from react-router-dom.
+ */
+function fixMissingRouterImports(code: string): string {
+  // Find all react-router-dom names used in the code (JSX tags + hook calls)
+  const usedRouter = new Set<string>();
+  // JSX tags: <Link, <NavLink, <Routes, <Route, <Outlet, <Navigate, <HashRouter, etc.
+  const jsxTagRe = /<(Link|NavLink|Route|Routes|Outlet|Navigate|HashRouter|BrowserRouter|MemoryRouter)[\s/>]/g;
+  let m: RegExpExecArray | null;
+  while ((m = jsxTagRe.exec(code)) !== null) {
+    usedRouter.add(m[1]);
+  }
+  // Hooks: useNavigate(, useLocation(, useParams(, useSearchParams(
+  const hookRe = /\b(useNavigate|useLocation|useParams|useSearchParams)\s*\(/g;
+  while ((m = hookRe.exec(code)) !== null) {
+    usedRouter.add(m[1]);
+  }
+
+  if (usedRouter.size === 0) return code;
+
+  // Find what's already imported from react-router-dom
+  const existingImport = code.match(/import\s*\{([^}]+)\}\s*from\s*['"]react-router-dom['"]/);
+  const alreadyImported = new Set<string>();
+  if (existingImport) {
+    existingImport[1].split(",").forEach((n) => {
+      const trimmed = n.trim().split(/\s+as\s+/)[0].trim();
+      if (trimmed) alreadyImported.add(trimmed);
+    });
+  }
+
+  // Find missing imports
+  const missing = [...usedRouter].filter(
+    (name) => ROUTER_COMPONENTS.has(name) && !alreadyImported.has(name)
+  );
+
+  if (missing.length === 0) return code;
+
+  console.log("[router-fix] Injecting missing react-router-dom imports:", missing);
+
+  if (existingImport) {
+    // Extend existing import
+    const existingNames = existingImport[1].split(",").map((n) => n.trim()).filter(Boolean);
+    const allNames = [...new Set([...existingNames, ...missing])];
+    const newImport = `import { ${allNames.join(", ")} } from "react-router-dom"`;
+    return code.replace(existingImport[0], newImport);
+  }
+
+  // No existing import — add one after the last import statement
+  const importLine = `import { ${missing.join(", ")} } from "react-router-dom";\n`;
+  const lastImportIdx = code.lastIndexOf("\nimport ");
+  if (lastImportIdx !== -1) {
+    const lineEnd = code.indexOf("\n", lastImportIdx + 1);
+    return code.slice(0, lineEnd + 1) + importLine + code.slice(lineEnd + 1);
+  }
+  return importLine + code;
+}
+
 export default function ReactProjectPreview({
   files,
   refreshKey,
@@ -728,6 +793,17 @@ export default function ReactProjectPreview({
     if (lucideWasInjected && !deps["lucide-react"]) {
       deps["lucide-react"] = "latest";
       console.log("[lucide-fix] Auto-added lucide-react dependency");
+    }
+
+    // Fix missing react-router-dom imports: AI often uses <Link>, <NavLink>, etc.
+    // without importing them. Detect and auto-inject the missing imports.
+    for (const [filePath, fileObj] of Object.entries(sfFiles)) {
+      if (!/\.(tsx|jsx)$/.test(filePath)) continue;
+      const fixed = fixMissingRouterImports(fileObj.code);
+      if (fixed !== fileObj.code) {
+        sfFiles[filePath] = { ...fileObj, code: fixed };
+        console.log("[router-fix] Injected router imports in:", filePath);
+      }
     }
 
     // Bridge App.tsx: imports CSS, scrolls to top on navigation, optionally navigates to a route, re-exports App

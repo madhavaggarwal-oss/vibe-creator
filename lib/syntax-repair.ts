@@ -36,6 +36,129 @@ export function tryParseTSX(code: string): string | null {
 }
 
 /**
+ * Locally fix "Adjacent JSX elements must be wrapped in an enclosing tag" errors.
+ * Uses the error's line number to find the offending return statement and wraps
+ * its body in a React fragment (<>...</>).
+ *
+ * Returns the fixed code, or the original code if the fix didn't work.
+ */
+function repairAdjacentJSX(code: string, parseError: string): string {
+  // Extract line number from error like "Adjacent JSX elements ... (68:12)"
+  const lineMatch = parseError.match(/\((\d+):\d+\)\s*$/);
+  if (!lineMatch) return code;
+
+  const errorLine = parseInt(lineMatch[1], 10); // 1-based
+  const lines = code.split("\n");
+  if (errorLine < 1 || errorLine > lines.length) return code;
+
+  // Scan backwards from the error line to find the `return` keyword or arrow `=> (`
+  let returnLineIdx = -1;
+  let isArrowImplicitReturn = false;
+  for (let i = errorLine - 1; i >= 0; i--) {
+    if (/\breturn\b/.test(lines[i])) {
+      returnLineIdx = i;
+      break;
+    }
+    // Arrow function implicit return: `=> (` or `=> <`
+    if (/=>\s*\(/.test(lines[i])) {
+      returnLineIdx = i;
+      isArrowImplicitReturn = true;
+      break;
+    }
+  }
+  if (returnLineIdx === -1) return code;
+
+  const returnLine = lines[returnLineIdx];
+
+  // Case 1: return ( ... ) or => ( ... ) — insert <> after ( and </> before matching )
+  const returnParenMatch = isArrowImplicitReturn
+    ? returnLine.match(/^(.*=>\s*)\((.*)$/)
+    : returnLine.match(/^(\s*return\s*)\((.*)$/);
+  if (returnParenMatch) {
+    // Find the matching closing paren by counting depth from returnLineIdx
+    let depth = 0;
+    let closeLineIdx = -1;
+    let closeCharIdx = -1;
+
+    for (let i = returnLineIdx; i < lines.length; i++) {
+      const line = lines[i];
+      const startCol = i === returnLineIdx ? returnLine.indexOf("(") : 0;
+      for (let j = startCol; j < line.length; j++) {
+        const ch = line[j];
+        if (ch === "(") depth++;
+        else if (ch === ")") {
+          depth--;
+          if (depth === 0) {
+            closeLineIdx = i;
+            closeCharIdx = j;
+            break;
+          }
+        }
+      }
+      if (closeLineIdx !== -1) break;
+    }
+
+    if (closeLineIdx === -1) return code;
+
+    // Insert </> before the closing )
+    const closeLine = lines[closeLineIdx];
+    lines[closeLineIdx] =
+      closeLine.slice(0, closeCharIdx) + "</>" + closeLine.slice(closeCharIdx);
+
+    // Insert <> after the opening (
+    const afterParen = returnParenMatch[2].trim();
+    if (afterParen.length === 0) {
+      // return (\n  — insert <> on the next line's indentation
+      if (returnLineIdx + 1 < lines.length) {
+        const nextLine = lines[returnLineIdx + 1];
+        const indent = nextLine.match(/^(\s*)/)?.[1] || "    ";
+        lines.splice(returnLineIdx + 1, 0, indent + "<>");
+        // Adjust closeLineIdx since we inserted a line
+        // (closeLineIdx was already set, now it's shifted by 1)
+      }
+    } else {
+      // return (<div>... — insert <> right after (
+      lines[returnLineIdx] = returnParenMatch[1] + "(<>" + returnParenMatch[2];
+    }
+
+    const fixed = lines.join("\n");
+    if (tryParseTSX(fixed) === null) {
+      console.warn(`[syntax-repair] repairAdjacentJSX: fixed with fragment wrapper`);
+      return fixed;
+    }
+    // If the simple approach failed, fall through
+  }
+
+  // Case 2: return <div>... (no parens) — wrap in return (<>...</>)
+  const returnDirectMatch = returnLine.match(/^(\s*)return\s+(<.*)$/);
+  if (returnDirectMatch) {
+    const indent = returnDirectMatch[1];
+    // Find the end: look for the line with the closing ; at the same or lower indent
+    let endLineIdx = -1;
+    for (let i = returnLineIdx; i < lines.length; i++) {
+      if (lines[i].trimEnd().endsWith(";") || (i > returnLineIdx && /^\s*\)/.test(lines[i]))) {
+        endLineIdx = i;
+        break;
+      }
+    }
+    if (endLineIdx === -1) endLineIdx = lines.length - 1;
+
+    // Wrap: change `return <...` to `return (<><...` and append `</>);` after end
+    lines[returnLineIdx] = indent + "return (<>" + returnDirectMatch[2];
+    const endLine = lines[endLineIdx].replace(/;?\s*$/, "");
+    lines[endLineIdx] = endLine + "</>);";
+
+    const fixed = lines.join("\n");
+    if (tryParseTSX(fixed) === null) {
+      console.warn(`[syntax-repair] repairAdjacentJSX: fixed with fragment wrapper (direct return)`);
+      return fixed;
+    }
+  }
+
+  return code; // couldn't fix
+}
+
+/**
  * Run AST validation on a code string and, if it fails, use the LLM to fix it.
  * Allows up to `maxAttempts` LLM retries. Returns the best version of the code.
  */
@@ -58,6 +181,15 @@ export async function astValidateAndRepair(
     console.warn(
       `[syntax-repair] AST parse: ${filename} failed (attempt ${attempt}/${maxAttempts}): ${parseError}`
     );
+
+    // Try fast local repairs before expensive LLM call
+    if (parseError.includes("Adjacent JSX elements must be wrapped")) {
+      const localFix = repairAdjacentJSX(current, parseError);
+      if (localFix !== current) {
+        current = localFix;
+        continue; // re-check with tryParseTSX at top of loop
+      }
+    }
 
     const fixed = await llmFixFile(current, filename, parseError);
 
