@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import HighLevelLayout from "@/components/highlevel-layout";
 import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
 
 const ITEMS_PER_PAGE = 24; // 6 rows x 4 cols
@@ -48,8 +47,8 @@ export default function ProjectsPage() {
   const formatDate = formatRelativeDate;
 
   return (
-    <HighLevelLayout activeTab="Vibe Creator" onTabChange={() => router.push("/")}>
-      <div className="flex-1 bg-gray-50/80 px-6 py-6">
+    <div className="min-h-screen bg-gray-50/80">
+      <div className="px-6 py-6">
         <div className="max-w-[1200px] mx-auto">
           {/* Header */}
           <div className="flex items-center justify-between mb-5">
@@ -198,6 +197,6 @@ export default function ProjectsPage() {
           )}
         </div>
       </div>
-    </HighLevelLayout>
+    </div>
   );
 }
