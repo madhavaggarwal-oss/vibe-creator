@@ -62,8 +62,8 @@ A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real
 - Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
 
 YOUR RESPONSIBILITIES — Build the complete calendar UI:
-1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, call calendarData.setSelectedDate(dateKey).
-2. Time slot picker: when a date is selected (calendarData.selectedDate is non-null), show the available times for that date from slots[calendarData.selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration. On time click, call calendarData.setSelectedTime(time).
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, update local state: use useState<string | null>(null) for selectedDate.
+2. Time slot picker: when a date is selected (selectedDate is non-null), show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from slotDuration. On time click, update local state: use useState<string | null>(null) for selectedTime.
 3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context (e.g. dental clinic → name, email, phone, insurance provider, reason for visit). The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern). No hidden inputs are needed — the hook automatically tracks the selected appointment slot.
 4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
 5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.
@@ -93,7 +93,9 @@ EXAMPLE USAGE:
 
     if (!calendarData) return <div>Loading calendar...</div>;
 
-    const { slots, slotDuration, selectedDate, selectedTime, setSelectedDate, setSelectedTime } = calendarData;
+    const { slots, slotDuration } = calendarData;
+    const [selectedDate, setSelectedDate] = useState<string | null>(null);
+    const [selectedTime, setSelectedTime] = useState<string | null>(null);
     const availableDates = new Set(Object.keys(slots));
 
     // Build date key for each calendar cell using formatDateKey (NOT toISOString):
@@ -532,8 +534,8 @@ A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real
 - Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
 
 YOUR RESPONSIBILITIES — Build the complete calendar UI:
-1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, call calendarData.setSelectedDate(dateKey).
-2. Time slot picker: when a date is selected (calendarData.selectedDate is non-null), show the available times for that date from slots[calendarData.selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration. On time click, call calendarData.setSelectedTime(time).
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, update local state: use useState<string | null>(null) for selectedDate.
+2. Time slot picker: when a date is selected (selectedDate is non-null), show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from slotDuration. On time click, update local state: use useState<string | null>(null) for selectedTime.
 3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context. The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern). No hidden inputs are needed — the hook automatically tracks the selected appointment slot.
 4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
 5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.
@@ -773,8 +775,8 @@ A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real
 - Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
 
 YOUR RESPONSIBILITIES — Build the complete calendar UI:
-1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, call calendarData.setSelectedDate(dateKey).
-2. Time slot picker: when a date is selected (calendarData.selectedDate is non-null), show the available times for that date from slots[calendarData.selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration. On time click, call calendarData.setSelectedTime(time).
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, update local state: use useState<string | null>(null) for selectedDate.
+2. Time slot picker: when a date is selected (selectedDate is non-null), show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from slotDuration. On time click, update local state: use useState<string | null>(null) for selectedTime.
 3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context. The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern). No hidden inputs are needed — the hook automatically tracks the selected appointment slot.
 4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
 5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.
@@ -1079,8 +1081,8 @@ A pre-built hook is available at /src/hooks/useCalendarData.ts. It provides real
 - Only dates that exist as keys in slots have availability — all other dates should be grayed out / disabled
 
 YOUR RESPONSIBILITIES — Build the complete calendar UI:
-1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, call calendarData.setSelectedDate(dateKey).
-2. Time slot picker: when a date is selected (calendarData.selectedDate is non-null), show the available times for that date from slots[calendarData.selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from calendarData.slotDuration. On time click, call calendarData.setSelectedTime(time).
+1. Calendar grid: render a month grid with day headers (Sun–Sat), month/year navigation (prev/next buttons), and date cells. Only dates present in slots should be clickable; others are disabled/grayed. On date click, update local state: use useState<string | null>(null) for selectedDate.
+2. Time slot picker: when a date is selected (selectedDate is non-null), show the available times for that date from slots[selectedDate]. Use the pre-built \`formatSlotTime(time)\` helper (exported from the hook file) to display times in 12-hour format — do NOT write your own time formatting logic. Show the slot duration from slotDuration. On time click, update local state: use useState<string | null>(null) for selectedTime.
 3. Booking form: after date + time selection, show a contextual <form> with fields appropriate for the funnel's business context. The form MUST follow all FORMS rules below (GHL field names, data-ghl-custom for custom fields, country_code + phone pattern). No hidden inputs are needed — the hook automatically tracks the selected appointment slot.
 4. Style everything to match the funnel's overall design theme (colors, fonts, spacing, border-radius).
 5. The calendar must be static — NO sliding, swiping, or transition animations on the calendar grid itself.

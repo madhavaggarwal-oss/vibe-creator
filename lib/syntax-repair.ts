@@ -36,6 +36,39 @@ export function tryParseTSX(code: string): string | null {
 }
 
 /**
+ * Attempt to transpile code the same way Sandpack's bundler does:
+ * using @babel/core with @babel/preset-typescript and @babel/preset-react.
+ *
+ * This catches errors that a parse-only check misses — the transformation
+ * step applies additional validation (type stripping, JSX transforms).
+ * Returns `null` on success, or the error message on failure.
+ */
+export function trySandpackTranspile(code: string): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const babel = require("@babel/core") as typeof import("@babel/core");
+
+    babel.transformSync(code, {
+      filename: "file.tsx",
+      presets: [
+        ["@babel/preset-typescript", { isTSX: true, allExtensions: true }],
+        ["@babel/preset-react", { runtime: "automatic" }],
+      ],
+      sourceType: "module",
+      code: false,
+      ast: false,
+    });
+
+    return null;
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "message" in err) {
+      return (err as Error).message;
+    }
+    return "Unknown transpilation error";
+  }
+}
+
+/**
  * Locally fix "Adjacent JSX elements must be wrapped in an enclosing tag" errors.
  * Uses the error's line number to find the offending return statement and wraps
  * its body in a React fragment (<>...</>).
@@ -159,43 +192,59 @@ function repairAdjacentJSX(code: string, parseError: string): string {
 }
 
 /**
- * Run AST validation on a code string and, if it fails, use the LLM to fix it.
- * Allows up to `maxAttempts` LLM retries. Returns the best version of the code.
+ * Detect the first error in code by running both parse and transpile checks.
+ * Returns `null` if clean, or the error message string.
+ */
+function detectError(code: string): string | null {
+  const parseError = tryParseTSX(code);
+  if (parseError !== null) return parseError;
+  return trySandpackTranspile(code);
+}
+
+/**
+ * Run AST + transpile validation on a code string and, if it fails, use the
+ * LLM to fix it. Allows up to `maxAttempts` LLM retries. Returns the best
+ * version of the code.
+ *
+ * When `externalError` is provided (e.g. the Sandpack error message with
+ * line/column context), it is used as the error description for the LLM if
+ * our own parsers cannot reproduce the error.
  */
 export async function astValidateAndRepair(
   code: string,
   filename: string,
-  maxAttempts: number = 2
+  maxAttempts: number = 2,
+  externalError?: string
 ): Promise<string> {
   let current = code;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const parseError = tryParseTSX(current);
-    if (parseError === null) {
+    const error = detectError(current);
+    if (error === null) {
       if (attempt > 1) {
-        console.warn(`[syntax-repair] AST parse: ${filename} fixed on LLM attempt ${attempt - 1}`);
+        console.warn(`[syntax-repair] ${filename} fixed on attempt ${attempt - 1}`);
       }
       return current;
     }
 
     console.warn(
-      `[syntax-repair] AST parse: ${filename} failed (attempt ${attempt}/${maxAttempts}): ${parseError}`
+      `[syntax-repair] ${filename} failed (attempt ${attempt}/${maxAttempts}): ${error}`
     );
 
     // Try fast local repairs before expensive LLM call
-    if (parseError.includes("Adjacent JSX elements must be wrapped")) {
-      const localFix = repairAdjacentJSX(current, parseError);
+    if (error.includes("Adjacent JSX elements must be wrapped")) {
+      const localFix = repairAdjacentJSX(current, error);
       if (localFix !== current) {
         current = localFix;
-        continue; // re-check with tryParseTSX at top of loop
+        continue; // re-check at top of loop
       }
     }
 
-    const fixed = await llmFixFile(current, filename, parseError);
+    const fixed = await llmFixFile(current, filename, error);
 
     // If the LLM returned the same code, no point retrying
     if (fixed === current) {
-      console.warn(`[syntax-repair] AST parse: ${filename} LLM returned identical code, stopping`);
+      console.warn(`[syntax-repair] ${filename} LLM returned identical code, stopping`);
       break;
     }
 
@@ -203,13 +252,28 @@ export async function astValidateAndRepair(
   }
 
   // Final check — if the last attempt still fails, log it
-  const finalError = tryParseTSX(current);
+  const finalError = detectError(current);
   if (finalError !== null) {
     console.warn(
-      `[syntax-repair] AST parse: ${filename} still has errors after ${maxAttempts} LLM attempt(s): ${finalError}`
+      `[syntax-repair] ${filename} still has errors after ${maxAttempts} attempt(s): ${finalError}`
     );
+
+    // Last resort: if we have an external error and our parsers see the code as
+    // fine (or can't fix it), try the LLM with the external error context
+    if (externalError && current === code) {
+      console.warn(`[syntax-repair] ${filename} trying LLM with external error context`);
+      const fixed = await llmFixFile(current, filename, externalError);
+      if (fixed !== current) {
+        const verifyError = detectError(fixed);
+        if (verifyError === null) {
+          console.warn(`[syntax-repair] ${filename} fixed via external error context`);
+          return fixed;
+        }
+        console.warn(`[syntax-repair] ${filename} LLM fix (external) introduced new errors: ${verifyError}`);
+      }
+    }
   } else {
-    console.warn(`[syntax-repair] AST parse: ${filename} fixed after LLM repair`);
+    console.warn(`[syntax-repair] ${filename} fixed after LLM repair`);
   }
 
   return current;
@@ -517,12 +581,22 @@ export async function llmFixFile(
       },
     });
 
-    const prompt = `Fix ONLY the syntax errors in this ${filename} file. Do NOT change any logic, variable names, or functionality. Return ONLY the corrected file contents — no explanation, no markdown fences, no extra text.
+    const prompt = `You are a syntax error fixer for React/TypeScript JSX code.
 
-Detected issues:
+TASK: Fix ONLY the syntax error described below. Do NOT change any logic, variable names, styling, or functionality. Return ONLY the corrected complete file contents — no explanation, no markdown fences, no extra text.
+
+RULES:
+1. The code must be valid TypeScript JSX (.tsx) that can be transpiled by Babel with @babel/preset-typescript and @babel/preset-react.
+2. Only fix the specific error — do not refactor or improve other parts of the code.
+3. If the error mentions "Identifier directly after number", look for bare hex/numeric tokens that should be quoted strings.
+4. If the error mentions "Unexpected token", look for missing brackets, mismatched delimiters, or invalid syntax near the indicated line.
+5. All JSX must return a single root element (use fragments <></> if needed).
+6. Ensure all imports are valid and all JSX tags are properly closed.
+
+ERROR DETAILS:
 ${issues}
 
-File contents:
+FILE (${filename}):
 ${code}`;
 
     const result = await model.generateContent(prompt);
@@ -699,12 +773,12 @@ export async function validateAndRepairFiles(
 
     const issues = analyzeSyntax(preFixed);
     if (issues.length === 0) {
-      // Tier 1.5: bracket analysis says clean — verify with AST parse
-      const parseError = tryParseTSX(preFixed);
-      if (parseError !== null) {
-        console.warn(`[syntax-repair] AST parse: ${path} has parse error despite clean bracket analysis: ${parseError}`);
+      // Tier 1.5: bracket analysis says clean — verify with AST parse + transpile
+      const codeError = detectError(preFixed);
+      if (codeError !== null) {
+        console.warn(`[syntax-repair] ${path} has error despite clean bracket analysis: ${codeError}`);
         // Queue for AST-guided LLM repair
-        llmTasks.push({ path, code: preFixed, issues: parseError, astOnly: true });
+        llmTasks.push({ path, code: preFixed, issues: codeError, astOnly: true });
         result[path] = preFixed; // placeholder; will be overwritten by LLM result
       } else {
         result[path] = preFixed;
@@ -721,11 +795,11 @@ export async function validateAndRepairFiles(
 
     if (remainingIssues.length === 0) {
       console.warn(`[syntax-repair] ${path}: local repair fixed all bracket issues`);
-      // Tier 1.5: verify with AST parse
-      const parseError = tryParseTSX(repaired);
-      if (parseError !== null) {
-        console.warn(`[syntax-repair] AST parse: ${path} still has parse error after local repair: ${parseError}`);
-        llmTasks.push({ path, code: repaired, issues: parseError, astOnly: true });
+      // Tier 1.5+1.75: verify with AST parse + transpile
+      const codeError = detectError(repaired);
+      if (codeError !== null) {
+        console.warn(`[syntax-repair] ${path} still has error after local repair: ${codeError}`);
+        llmTasks.push({ path, code: repaired, issues: codeError, astOnly: true });
         result[path] = repaired;
       } else {
         result[path] = repaired;

@@ -80,9 +80,16 @@ class SandpackErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryS
   }
 }
 
-// ── Parse Sandpack error message into a clean message + file path ──
-function parseSandpackError(rawMessage: string): { errorMessage: string; filePath: string | null } {
-  let errorMessage = rawMessage || "Unknown compilation error";
+// ── Parse Sandpack error into a clean message + file path + location ──
+interface ParsedError {
+  errorMessage: string;
+  filePath: string | null;
+  line: number | null;
+  column: number | null;
+}
+
+function parseSandpackError(error: { message?: string; line?: number; column?: number; path?: string; title?: string }): ParsedError {
+  let errorMessage = error.message || error.title || "Unknown compilation error";
 
   // Sandpack wraps SyntaxErrors with "Cannot assign to read only property 'message'"
   const readOnlyMatch = errorMessage.match(
@@ -92,12 +99,25 @@ function parseSandpackError(rawMessage: string): { errorMessage: string; filePat
     errorMessage = readOnlyMatch[1];
   }
 
-  // Extract file path from patterns like "/src/components/Hero.tsx: Unexpected token (46:11)"
-  let filePath: string | null = null;
+  // Use structured fields if available (preferred over parsing from message)
+  let filePath: string | null = error.path || null;
+  let line: number | null = error.line ?? null;
+  let column: number | null = error.column ?? null;
+
+  // Fallback: extract file path from message if not in structured fields
   const filePathMatch = errorMessage.match(/^(\/src\/[^:]+):\s*/);
   if (filePathMatch) {
-    filePath = filePathMatch[1];
+    if (!filePath) filePath = filePathMatch[1];
     errorMessage = errorMessage.slice(filePathMatch[0].length);
+  }
+
+  // Extract line:column from message like "Unexpected token (46:12)"
+  if (line === null) {
+    const lineColMatch = errorMessage.match(/\((\d+):(\d+)\)\s*$/);
+    if (lineColMatch) {
+      line = parseInt(lineColMatch[1], 10);
+      column = parseInt(lineColMatch[2], 10);
+    }
   }
 
   // Clean up "SyntaxError:" prefix
@@ -106,7 +126,7 @@ function parseSandpackError(rawMessage: string): { errorMessage: string; filePat
     errorMessage = syntaxMatch[1];
   }
 
-  return { errorMessage, filePath };
+  return { errorMessage, filePath, line, column };
 }
 
 // ── Auto-repair overlay — detects compilation errors and attempts LLM fix ──
@@ -141,7 +161,7 @@ function AutoRepairOverlay({
   }
 
   const attemptRepair = useCallback(
-    async (errorMsg: string, filePath: string | null) => {
+    async (errorMsg: string, filePath: string | null, line: number | null, column: number | null) => {
       if (!funnelId || !onRepair) return;
       if (repairInFlight.current) return;
       if (distinctErrorCount.current >= 2) return;
@@ -165,6 +185,8 @@ function AutoRepairOverlay({
           body: JSON.stringify({
             filePath: filePath || "/src/App.tsx",
             errorMessage: errorMsg,
+            line,
+            column,
           }),
         });
 
@@ -203,10 +225,10 @@ function AutoRepairOverlay({
 
     if (!funnelId || !onRepair) return;
 
-    const { errorMessage, filePath } = parseSandpackError(rawError.message || "");
+    const { errorMessage, filePath, line, column } = parseSandpackError(rawError);
 
     debounceTimer.current = setTimeout(() => {
-      attemptRepair(errorMessage, filePath);
+      attemptRepair(errorMessage, filePath, line, column);
     }, 500);
 
     return () => {
@@ -216,7 +238,7 @@ function AutoRepairOverlay({
 
   if (!rawError) return null;
 
-  const { errorMessage } = parseSandpackError(rawError.message || "");
+  const { errorMessage, filePath } = parseSandpackError(rawError);
 
   // Show "Fixing..." while repair is in flight
   if (repairing) {
@@ -245,7 +267,7 @@ function AutoRepairOverlay({
         <div>
           <h3 className="text-sm font-semibold text-gray-800">Preview compilation error</h3>
           <p className="mt-2 text-xs text-gray-600 leading-relaxed font-mono bg-gray-50 rounded-lg px-3 py-2 text-left break-all">
-            {errorMessage}
+            {filePath ? `${filePath}: ` : ""}{errorMessage}
           </p>
         </div>
         <p className="text-xs text-gray-400">
@@ -420,6 +442,13 @@ const NON_ICON_NAMES = new Set([
   "Event", "Node", "Element", "Document", "Window", "Image",
   // TypedArrays
   "Int8Array", "Uint8Array", "Float32Array", "Float64Array", "BigInt",
+  // DOM types commonly used in generics like useRef<HTMLDivElement>
+  "HTMLDivElement", "HTMLInputElement", "HTMLFormElement", "HTMLButtonElement",
+  "HTMLTextAreaElement", "HTMLSelectElement", "HTMLAnchorElement", "HTMLSpanElement",
+  "HTMLImageElement", "HTMLCanvasElement", "HTMLVideoElement", "HTMLAudioElement",
+  "HTMLElement", "SVGSVGElement", "SVGElement",
+  // Generic component names used as callback params (e.g. .map((Icon, i) => <Icon />))
+  "Icon", "Component", "Item", "Card",
 ]);
 
 /**
@@ -430,7 +459,9 @@ function fixMissingLucideImports(code: string, hasLucideDep: boolean, projectCom
   if (!hasLucideDep) return code;
 
   // Find all PascalCase JSX tags: <ComponentName or <ComponentName> or <ComponentName />
-  const jsxUsageRegex = /<([A-Z][A-Za-z0-9]+)[\s/>]/g;
+  // Exclude TypeScript generics by requiring the `<` to NOT be preceded by a word char
+  // (generics always follow an identifier: useRef<HTMLDivElement>, useState<Date>, Array<string>)
+  const jsxUsageRegex = /(?<!\w)<([A-Z][A-Za-z0-9]+)[\s/>]/g;
   const usedComponents = new Set<string>();
   let m;
   while ((m = jsxUsageRegex.exec(code)) !== null) {
@@ -470,6 +501,13 @@ function fixMissingLucideImports(code: string, hasLucideDep: boolean, projectCom
   // Find locally defined components: function Name / const Name
   const defRegex = /(?:function|const|let|var|class)\s+([A-Z][A-Za-z0-9]+)/g;
   while ((m = defRegex.exec(code)) !== null) {
+    importedNames.add(m[1]);
+  }
+
+  // Detect PascalCase callback params: .map((Icon, i) => ...) or .map((Item) => ...)
+  // These are locally scoped variables, not imports.
+  const callbackParamRegex = /\.\w+\(\(([A-Z][A-Za-z0-9]*)/g;
+  while ((m = callbackParamRegex.exec(code)) !== null) {
     importedNames.add(m[1]);
   }
 
