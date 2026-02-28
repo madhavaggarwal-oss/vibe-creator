@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentUserId } from "@/lib/supabase/server";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/server";
+import { getCurrentUserId, createClient, createAdminClient, isAdminSession } from "@/lib/supabase/server";
 
 export async function GET() {
   const userId = await getCurrentUserId();
@@ -15,7 +13,7 @@ export async function GET() {
   const email = user?.email;
 
   if (!email) {
-    return NextResponse.json({ name: null });
+    return NextResponse.json({ name: null, isAdmin: false });
   }
 
   // Look up name from allowed_emails table
@@ -26,5 +24,11 @@ export async function GET() {
     .eq("email", email.toLowerCase())
     .single();
 
-  return NextResponse.json({ name: data?.name || null });
+  // Check admin status (includes impersonation cookie check)
+  const isAdmin = await isAdminSession();
+
+  return NextResponse.json({
+    name: data?.name || null,
+    isAdmin,
+  });
 }
