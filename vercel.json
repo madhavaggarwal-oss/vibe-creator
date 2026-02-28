@@ -1,0 +1,19 @@
+{
+  "functions": {
+    "app/api/generate/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/chat/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/funnel/*/generate-images/route.ts": {
+      "maxDuration": 120
+    },
+    "app/api/funnel/*/repair/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

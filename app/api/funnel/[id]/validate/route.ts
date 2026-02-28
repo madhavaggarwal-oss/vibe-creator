@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFunnel, isReactProject } from "@/lib/storage";
+import { getCurrentUserId } from "@/lib/supabase/server";
 
 interface ValidationError {
   file: string;
@@ -185,8 +186,11 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id } = await params;
-  const funnel = await getFunnel(id);
+  const funnel = await getFunnel(id, userId);
 
   if (!funnel) {
     return NextResponse.json({ error: "Funnel not found" }, { status: 404 });

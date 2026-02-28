@@ -13,6 +13,7 @@ import json from "highlight.js/lib/languages/json";
 import "highlight.js/styles/github-dark.css";
 import { processImageFiles, type PendingImage } from "@/lib/image-utils";
 import type { ChatMessage } from "@/lib/storage";
+import { readStreamResponse } from "@/lib/stream-response";
 import ImageUpload from "@/components/image-upload";
 
 hljs.registerLanguage("xml", xml);
@@ -763,8 +764,12 @@ export default function GenerateResultPage() {
           signal: controller.signal,
         });
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to generate");
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ error: "Failed to generate" }));
+          throw new Error(errData.error || "Failed to generate");
+        }
+
+        const data = await readStreamResponse<{ id: string; fileCount: number; hasCalendar: boolean }>(res);
 
         // Finish progress
         if (progressTimerRef.current) clearInterval(progressTimerRef.current);
@@ -891,8 +896,11 @@ export default function GenerateResultPage() {
                 }),
                 signal: controller.signal,
               });
-              const genData = await genRes.json();
-              if (!genRes.ok) throw new Error(genData.error || "Failed to generate");
+              if (!genRes.ok) {
+                const errData = await genRes.json().catch(() => ({ error: "Failed to generate" }));
+                throw new Error(errData.error || "Failed to generate");
+              }
+              const genData = await readStreamResponse<{ id: string; fileCount: number; hasCalendar: boolean }>(genRes);
 
               if (progressTimerRef.current) clearInterval(progressTimerRef.current);
               if (stepTimerRef.current) clearInterval(stepTimerRef.current);
@@ -1117,8 +1125,12 @@ export default function GenerateResultPage() {
         signal: controller.signal,
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to process edit");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: "Failed to process edit" }));
+        throw new Error(errData.error || "Failed to process edit");
+      }
+
+      const data = await readStreamResponse<{ message: string; changedFiles: string[]; hasCalendar: boolean }>(res);
 
       console.log("[Edit] API response received — hasCalendar:", data.hasCalendar, "prevHasCalendar:", hasCalendar, "message length:", data.message?.length);
 

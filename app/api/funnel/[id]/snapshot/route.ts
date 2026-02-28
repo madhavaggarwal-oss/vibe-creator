@@ -1,13 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isValidFunnelId } from "@/lib/storage";
-import fs from "fs/promises";
-import path from "path";
-
-const SNAPSHOTS_DIR = path.join(process.cwd(), "data", "snapshots");
-
-async function ensureSnapshotsDir() {
-  await fs.mkdir(SNAPSHOTS_DIR, { recursive: true });
-}
+import { isValidFunnelId, getSnapshot, saveSnapshot, deleteSnapshot } from "@/lib/storage";
 
 function escapeHtml(str: string): string {
   return str
@@ -36,25 +28,25 @@ export async function GET(
   if (!isValidFunnelId(id)) {
     return new NextResponse("Invalid ID", { status: 400 });
   }
-  const filePath = path.join(SNAPSHOTS_DIR, `${id}.html`);
 
-  try {
-    const html = await fs.readFile(filePath, "utf-8");
+  const html = await getSnapshot(id);
+
+  if (html) {
     return new NextResponse(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "public, max-age=86400",
       },
     });
-  } catch {
-    // No snapshot yet — return placeholder
-    return new NextResponse(placeholderHtml(), {
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-cache",
-      },
-    });
   }
+
+  // No snapshot yet — return placeholder
+  return new NextResponse(placeholderHtml(), {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
 }
 
 export async function POST(
@@ -73,10 +65,7 @@ export async function POST(
       return NextResponse.json({ error: "Missing html" }, { status: 400 });
     }
 
-    await ensureSnapshotsDir();
-    const filePath = path.join(SNAPSHOTS_DIR, `${id}.html`);
-    await fs.writeFile(filePath, html, "utf-8");
-
+    await saveSnapshot(id, html);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Failed to save snapshot" }, { status: 500 });
@@ -91,13 +80,7 @@ export async function DELETE(
   if (!isValidFunnelId(id)) {
     return NextResponse.json({ error: "Invalid funnel ID" }, { status: 400 });
   }
-  const filePath = path.join(SNAPSHOTS_DIR, `${id}.html`);
 
-  try {
-    await fs.unlink(filePath);
-  } catch {
-    // File didn't exist — that's fine
-  }
-
+  await deleteSnapshot(id);
   return NextResponse.json({ ok: true });
 }

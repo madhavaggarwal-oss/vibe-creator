@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFunnel, saveFunnel, isReactProject } from "@/lib/storage";
+import { getCurrentUserId } from "@/lib/supabase/server";
 import {
   astValidateAndRepair,
   tryParseTSX,
@@ -47,6 +48,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id } = await params;
 
   let body: {
@@ -69,7 +73,7 @@ export async function POST(
     );
   }
 
-  const funnel = await getFunnel(id);
+  const funnel = await getFunnel(id, userId);
   if (!funnel || !isReactProject(funnel) || !funnel.files) {
     return NextResponse.json({ error: "Funnel not found" }, { status: 404 });
   }
@@ -105,7 +109,7 @@ export async function POST(
   if (fixed !== originalCode) {
     // Repair changed the code — save and return
     const updatedFiles = { ...funnel.files, [filePath]: fixed };
-    await saveFunnel({ ...funnel, files: updatedFiles });
+    await saveFunnel({ ...funnel, files: updatedFiles }, userId);
     console.log(`[repair] ${id} — ${filePath}: auto-repair saved`);
     return NextResponse.json({ fixed: true, files: updatedFiles });
   }
@@ -126,7 +130,7 @@ export async function POST(
 
     if (verifyTranspile === null) {
       const updatedFiles = { ...funnel.files, [filePath]: llmFixed };
-      await saveFunnel({ ...funnel, files: updatedFiles });
+      await saveFunnel({ ...funnel, files: updatedFiles }, userId);
       console.log(
         `[repair] ${id} — ${filePath}: LLM repair (Sandpack error context) saved`
       );

@@ -6,6 +6,7 @@ import { MODELS } from "./model-data";
 import { processImageFiles, processCloneImageFiles, type PendingImage } from "@/lib/image-utils";
 import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
 import ImageUpload from "./image-upload";
+import { createClient } from "@/lib/supabase/client";
 
 export default function VibeSitePage() {
   const router = useRouter();
@@ -164,8 +165,28 @@ export default function VibeSitePage() {
     }
   };
 
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  };
+
   return (
     <div className="flex flex-col h-full">
+      {/* Logout button */}
+      <div className="absolute top-4 right-4 z-20">
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-1.5 rounded-lg bg-white/70 backdrop-blur-sm border border-gray-200/60 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-white/90 transition-all shadow-sm"
+        >
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          Sign out
+        </button>
+      </div>
+
       {/* Hero section with animated background */}
       <div className="relative overflow-hidden" style={{ minHeight: "83vh" }}>
         {/* Animated gradient background */}

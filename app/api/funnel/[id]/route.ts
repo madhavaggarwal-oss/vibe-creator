@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFunnel, saveFunnel, isReactProject, isValidFunnelId } from "@/lib/storage";
-import fs from "fs/promises";
-import path from "path";
+import { getFunnel, saveFunnel, isReactProject, isValidFunnelId, deleteFunnel } from "@/lib/storage";
+import { getCurrentUserId } from "@/lib/supabase/server";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id } = await params;
-  const funnel = await getFunnel(id);
+  const funnel = await getFunnel(id, userId);
 
   if (!funnel) {
     return NextResponse.json({ error: "Funnel not found" }, { status: 404 });
@@ -52,8 +54,11 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id } = await params;
-  const funnel = await getFunnel(id);
+  const funnel = await getFunnel(id, userId);
 
   if (!funnel) {
     return NextResponse.json({ error: "Funnel not found" }, { status: 404 });
@@ -65,17 +70,14 @@ export async function PATCH(
     funnel.preGenHistory = body.preGenHistory;
   }
 
-  // Replace full chat history (used when inserting calendar-connected messages)
   if (Array.isArray(body.chatHistory)) {
     funnel.chatHistory = body.chatHistory;
   }
 
-  // Append chat messages (used when edits are stopped — persist user prompt + stopped message)
   if (Array.isArray(body.appendChatHistory)) {
     funnel.chatHistory = [...funnel.chatHistory, ...body.appendChatHistory];
   }
 
-  // Calendar integration fields
   if (body.selectedCalendarId !== undefined) {
     funnel.selectedCalendarId = body.selectedCalendarId || undefined;
     funnel.selectedCalendarName = body.selectedCalendarName || undefined;
@@ -88,7 +90,7 @@ export async function PATCH(
     funnel.hasCalendar = body.hasCalendar;
   }
 
-  await saveFunnel(funnel);
+  await saveFunnel(funnel, userId);
   return NextResponse.json({ ok: true });
 }
 
@@ -96,26 +98,17 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id } = await params;
   if (!isValidFunnelId(id)) {
     return NextResponse.json({ error: "Invalid funnel ID" }, { status: 400 });
   }
-  const dataDir = path.join(process.cwd(), "data");
-  const filePath = path.join(dataDir, `${id}.json`);
 
-  try {
-    await fs.access(filePath);
-  } catch {
+  const deleted = await deleteFunnel(id, userId);
+  if (!deleted) {
     return NextResponse.json({ error: "Funnel not found" }, { status: 404 });
-  }
-
-  await fs.unlink(filePath);
-
-  // Also delete snapshot if it exists
-  try {
-    await fs.unlink(path.join(dataDir, "snapshots", `${id}.html`));
-  } catch {
-    // no snapshot — fine
   }
 
   return NextResponse.json({ ok: true });

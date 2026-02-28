@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFunnel } from "@/lib/storage";
+import { getCurrentUserId } from "@/lib/supabase/server";
 
 const CANVAS_SCRIPT = `<script>
 document.addEventListener('click', function(e) {
@@ -20,10 +21,13 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; slug: string }> }
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) return new NextResponse("Unauthorized", { status: 401 });
+
   const { id, slug } = await params;
   const isCanvas = request.nextUrl.searchParams.get("canvas") === "true";
 
-  const funnel = await getFunnel(id);
+  const funnel = await getFunnel(id, userId);
   if (!funnel) {
     return new NextResponse("Funnel not found", { status: 404 });
   }

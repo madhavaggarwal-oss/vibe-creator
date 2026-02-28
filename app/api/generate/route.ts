@@ -1,32 +1,32 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { generateFunnel } from "@/lib/gemini";
 import { saveFunnel, extractProjectName } from "@/lib/storage";
+import { createStreamingResponse } from "@/lib/stream-response";
+import { getCurrentUserId } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { prompt, model, images, scrapeData, isImageClone } = body;
+  const userId = await getCurrentUserId();
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
-      return NextResponse.json(
-        { error: "Prompt is required" },
-        { status: 400 }
-      );
-    }
+  const body = await request.json();
+  const { prompt, model, images, scrapeData, isImageClone } = body;
 
-    const modelId = model || "gemini-3-flash-preview";
-    const id = uuidv4();
+  if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
+    return Response.json({ error: "Prompt is required" }, { status: 400 });
+  }
 
-    const MAX_IMAGES = 10;
-    const imageList = Array.isArray(images)
-      ? images.filter((i: unknown) => typeof i === "string").slice(0, MAX_IMAGES)
-      : [];
+  const modelId = model || "gemini-3-flash-preview";
+  const id = uuidv4();
 
-    // Pass the request abort signal directly to generateFunnel so the Gemini API
-    // call is actually cancelled when the client disconnects (not just ignored).
-    // This prevents a zombie first-generation from consuming API quota when the
-    // user aborts and retries with a new prompt.
+  const MAX_IMAGES = 10;
+  const imageList = Array.isArray(images)
+    ? images.filter((i: unknown) => typeof i === "string").slice(0, MAX_IMAGES)
+    : [];
+
+  return createStreamingResponse(async (send) => {
+    send({ type: "progress", message: "Generating code with AI..." });
+
     const { files, hasCalendar } = await generateFunnel(
       prompt.trim(),
       modelId,
@@ -36,15 +36,12 @@ export async function POST(request: NextRequest) {
       !!isImageClone
     );
 
-    console.log(`[Generate API] hasCalendar: ${hasCalendar}`);
-
-    // Double-check: if client disconnected while Gemini was finishing, don't save
     if (request.signal.aborted) {
-      return NextResponse.json(
-        { error: "Generation cancelled" },
-        { status: 499 }
-      );
+      send({ type: "error", message: "Generation cancelled" });
+      return;
     }
+
+    send({ type: "progress", message: "Saving project..." });
 
     const name = extractProjectName(files) || prompt.trim().slice(0, 60);
 
@@ -62,25 +59,15 @@ export async function POST(request: NextRequest) {
       createdAt: new Date().toISOString(),
     };
 
-    await saveFunnel(funnel);
+    await saveFunnel(funnel, userId);
 
-    return NextResponse.json({
-      id,
-      fileCount: Object.keys(files).length,
-      hasCalendar,
+    send({
+      type: "result",
+      data: {
+        id,
+        fileCount: Object.keys(files).length,
+        hasCalendar,
+      },
     });
-  } catch (error: unknown) {
-    // If the client disconnected (abort), return silently
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return NextResponse.json(
-        { error: "Generation cancelled" },
-        { status: 499 }
-      );
-    }
-
-    console.error("Generation error:", error);
-    const message =
-      error instanceof Error ? error.message : "Failed to generate funnel";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  }, request.signal);
 }

@@ -1,52 +1,47 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { editFunnel } from "@/lib/gemini";
-import { getFunnel, saveFunnel, isReactProject } from "@/lib/storage";
+import { getFunnel, saveFunnel, isReactProject, deleteSnapshot } from "@/lib/storage";
 import { processImageMarkers } from "@/lib/image-gen";
-import fs from "fs/promises";
-import path from "path";
+import { createStreamingResponse } from "@/lib/stream-response";
+import { getCurrentUserId } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { funnelId, message, model, images } = body;
+  const userId = await getCurrentUserId();
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (!funnelId || typeof funnelId !== "string") {
-      return NextResponse.json(
-        { error: "funnelId is required" },
-        { status: 400 }
-      );
-    }
-    if (!message || typeof message !== "string" || message.trim().length === 0) {
-      return NextResponse.json(
-        { error: "message is required" },
-        { status: 400 }
-      );
-    }
+  const body = await request.json();
+  const { funnelId, message, model, images } = body;
 
-    const funnel = await getFunnel(funnelId);
-    if (!funnel) {
-      return NextResponse.json(
-        { error: "Funnel not found" },
-        { status: 404 }
-      );
-    }
+  if (!funnelId || typeof funnelId !== "string") {
+    return Response.json({ error: "funnelId is required" }, { status: 400 });
+  }
+  if (!message || typeof message !== "string" || message.trim().length === 0) {
+    return Response.json({ error: "message is required" }, { status: 400 });
+  }
 
-    if (!isReactProject(funnel)) {
-      return NextResponse.json(
-        { error: "Legacy HTML funnels cannot be edited. Please create a new project." },
-        { status: 400 }
-      );
-    }
+  const funnel = await getFunnel(funnelId, userId);
+  if (!funnel) {
+    return Response.json({ error: "Funnel not found" }, { status: 404 });
+  }
 
-    const modelId = model || funnel.model;
-    const trimmedMessage = message.trim();
+  if (!isReactProject(funnel)) {
+    return Response.json(
+      { error: "Legacy HTML funnels cannot be edited. Please create a new project." },
+      { status: 400 }
+    );
+  }
 
-    const MAX_IMAGES = 10;
-    const imageList = Array.isArray(images)
-      ? images.filter((i: unknown) => typeof i === "string").slice(0, MAX_IMAGES)
-      : [];
+  const modelId = model || funnel.model;
+  const trimmedMessage = message.trim();
 
-    // Pass abort signal so the Gemini call is cancelled when the client disconnects
+  const MAX_IMAGES = 10;
+  const imageList = Array.isArray(images)
+    ? images.filter((i: unknown) => typeof i === "string").slice(0, MAX_IMAGES)
+    : [];
+
+  return createStreamingResponse(async (send) => {
+    send({ type: "progress", message: "Editing with AI..." });
+
     const result = await editFunnel(
       funnel.files!,
       trimmedMessage,
@@ -56,13 +51,12 @@ export async function POST(request: NextRequest) {
       request.signal
     );
 
-    // If client disconnected during generation, don't save changes
     if (request.signal.aborted) {
-      return NextResponse.json(
-        { error: "Edit cancelled" },
-        { status: 499 }
-      );
+      send({ type: "error", message: "Edit cancelled" });
+      return;
     }
+
+    send({ type: "progress", message: "Processing changes..." });
 
     // Merge partial file updates into existing files
     const updatedFiles = { ...funnel.files! };
@@ -74,9 +68,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Process image markers in changed files.
-    // Also detect broken/placeholder image patterns that need fixing
-    // (empty src, /placeholder.svg, placeholder service URLs, etc.)
+    // Process image markers in changed files
     const needsImageProcessing = Object.values(updatedFiles).some(
       (v) =>
         typeof v === "string" &&
@@ -85,25 +77,25 @@ export async function POST(request: NextRequest) {
           /src\s*=\s*""\s/i.test(v))
     );
 
-    // Check again before expensive image processing
     if (request.signal.aborted) {
-      return NextResponse.json(
-        { error: "Edit cancelled" },
-        { status: 499 }
-      );
+      send({ type: "error", message: "Edit cancelled" });
+      return;
+    }
+
+    if (needsImageProcessing) {
+      send({ type: "progress", message: "Generating images..." });
     }
 
     const finalFiles = needsImageProcessing
       ? await processImageMarkers(updatedFiles)
       : updatedFiles;
 
-    // Final check before saving
     if (request.signal.aborted) {
-      return NextResponse.json(
-        { error: "Edit cancelled" },
-        { status: 499 }
-      );
+      send({ type: "error", message: "Edit cancelled" });
+      return;
     }
+
+    send({ type: "progress", message: "Saving changes..." });
 
     // Update chat history
     const chatHistory = [...funnel.chatHistory];
@@ -121,44 +113,27 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Chat API] hasCalendar: ${result.hasCalendar}`);
 
-    // Save updated funnel with calendar detection state
     await saveFunnel({
       ...funnel,
       files: finalFiles,
       chatHistory,
       hasCalendar: result.hasCalendar,
-      // If calendar was removed by the edit, clear calendar selection
       ...(!result.hasCalendar && funnel.hasCalendar ? {
         selectedCalendarId: undefined,
         selectedCalendarName: undefined,
         calendarSlots: undefined,
       } : {}),
+    }, userId);
+
+    await deleteSnapshot(funnelId);
+
+    send({
+      type: "result",
+      data: {
+        message: result.message,
+        changedFiles: Object.keys(result.files),
+        hasCalendar: result.hasCalendar,
+      },
     });
-
-    // Invalidate cached snapshot so it gets re-captured
-    try {
-      await fs.unlink(path.join(process.cwd(), "data", "snapshots", `${funnelId}.html`));
-    } catch {
-      // File may not exist — that's fine
-    }
-
-    return NextResponse.json({
-      message: result.message,
-      changedFiles: Object.keys(result.files),
-      hasCalendar: result.hasCalendar,
-    });
-  } catch (error: unknown) {
-    // If the client disconnected (abort), return silently
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return NextResponse.json(
-        { error: "Edit cancelled" },
-        { status: 499 }
-      );
-    }
-
-    console.error("Chat edit error:", error);
-    const errMsg =
-      error instanceof Error ? error.message : "Failed to process edit";
-    return NextResponse.json({ error: errMsg }, { status: 500 });
-  }
+  }, request.signal);
 }
