@@ -1,16 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserId } from "@/lib/supabase/server";
+import { getGHLConfig } from "@/lib/ghl-config";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ calendarId: string }> }
 ) {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { calendarId } = await params;
-  const apiKey = process.env.GHL_API_KEY;
+  const config = await getGHLConfig(userId);
+  const apiKey = config.apiKey;
 
   if (!apiKey) {
-    console.error("[GHL Slots] Missing GHL_API_KEY env var");
+    console.error("[GHL Slots] Missing GHL API key for user:", userId);
     return NextResponse.json(
-      { error: "Calendar service unavailable." },
+      { error: "GHL is not configured. Please set up your GHL credentials in Settings." },
       { status: 500 }
     );
   }

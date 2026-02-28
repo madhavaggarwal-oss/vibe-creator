@@ -1,22 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserId } from "@/lib/supabase/server";
+import { getGHLConfig } from "@/lib/ghl-config";
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.GHL_API_KEY;
-  const locationId = process.env.GHL_LOCATION_ID;
-  const assignedUserId = process.env.GHL_USER_ID;
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const config = await getGHLConfig(userId);
+  const apiKey = config.apiKey;
+  const locationId = config.locationId;
+  const assignedUserId = config.assignedUserId;
 
   if (!apiKey || !locationId) {
-    console.error("[GHL] Missing GHL_API_KEY or GHL_LOCATION_ID env vars");
+    console.error("[GHL] Missing GHL API key or Location ID for user:", userId);
     return NextResponse.json(
-      { error: "Something went wrong. Please try again later." },
+      { error: "GHL is not configured. Please set up your GHL credentials in Settings." },
       { status: 500 }
     );
   }
 
   if (!assignedUserId) {
-    console.error("[GHL] Missing GHL_USER_ID env var");
+    console.error("[GHL] Missing GHL User ID for user:", userId);
     return NextResponse.json(
-      { error: "Something went wrong. Please try again later." },
+      { error: "GHL User ID is not configured. Please set up your GHL credentials in Settings." },
       { status: 500 }
     );
   }

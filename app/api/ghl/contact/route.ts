@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserId } from "@/lib/supabase/server";
+import { getGHLConfig } from "@/lib/ghl-config";
 
 // GHL predefined contact fields (top-level properties in the Create Contact API)
 const GHL_PREDEFINED_FIELDS = new Set([
@@ -184,13 +186,19 @@ function toFriendlyError(
 }
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.GHL_API_KEY;
-  const locationId = process.env.GHL_LOCATION_ID;
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const config = await getGHLConfig(userId);
+  const apiKey = config.apiKey;
+  const locationId = config.locationId;
 
   if (!apiKey || !locationId) {
-    console.error("[GHL] Missing GHL_API_KEY or GHL_LOCATION_ID env vars");
+    console.error("[GHL] Missing GHL API key or Location ID for user:", userId);
     return NextResponse.json(
-      { error: "Something went wrong. Please try again later." },
+      { error: "GHL is not configured. Please set up your GHL credentials in Settings." },
       { status: 500 }
     );
   }
