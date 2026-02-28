@@ -174,7 +174,6 @@ COLOR STRATEGY:
 - Use the accent color SPARINGLY for maximum impact: CTAs, gradient text, glow effects, active states
 - Dark theme text hierarchy: text-white, text-white/70, text-white/50 (not gray-400)
 - Light theme text hierarchy: text-gray-900, text-gray-600, text-gray-400
-- Do NOT define custom colors in tailwind.config.ts — use Tailwind's built-in palette with arbitrary values when needed
 
 TYPOGRAPHY THAT COMMANDS ATTENTION:
 - Hero headlines: text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight — BIG and confident
@@ -1111,7 +1110,7 @@ YOUR RESPONSIBILITIES — Build the complete calendar UI:
 1. PARTIAL UPDATES: Only return files that actually changed. Do NOT return unchanged files.
 2. CONSISTENCY: If changing a component's props or exports, also update all files that import it.
 3. ROUTING: When adding/removing pages, always update /src/App.tsx with the new routes AND update /src/components/Navbar.tsx with navigation links.
-4. COLORS: Use ONLY Tailwind's built-in default colors (blue-500, slate-900, etc.). Do NOT define custom colors.
+4. COLORS: Use Tailwind's built-in palette or define custom colors in tailwind.config.ts theme.extend.colors.
 5. PRESERVE QUALITY: Maintain all animations, hover effects, responsive layout, and visual polish. Never degrade existing design.
 6. NEW COMPONENTS: Place in appropriate directories (/src/components/, /src/pages/, /src/lib/).
 7. IMPORTS: Every component, hook, icon, or library used in a file MUST be imported at the top of that file. Never use an undefined variable. If you use lucide-react icons (e.g. <Scissors />, <Star />), you MUST import them: import { Scissors, Star } from "lucide-react". When creating new files, make sure they are imported where needed.

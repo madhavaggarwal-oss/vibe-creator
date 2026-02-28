@@ -280,6 +280,35 @@ function AutoRepairOverlay({
   );
 }
 
+/**
+ * Extract the theme config from tailwind.config.ts/js so it can be passed
+ * to the Tailwind CDN inline. This lets custom colors, fonts, etc. work
+ * natively without regex replacement.
+ */
+function extractTailwindThemeConfig(configCode: string): string | null {
+  // Match the theme or theme.extend block — extract the full object
+  // We look for: theme: { extend: { ... } } or theme: { ... }
+  const themeMatch = configCode.match(/theme\s*:\s*\{/);
+  if (!themeMatch || themeMatch.index === undefined) return null;
+
+  // Find the matching closing brace for the theme object
+  let depth = 0;
+  let startIdx = -1;
+  for (let i = themeMatch.index + themeMatch[0].length - 1; i < configCode.length; i++) {
+    if (configCode[i] === "{") {
+      if (depth === 0) startIdx = i;
+      depth++;
+    } else if (configCode[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        const themeBlock = configCode.slice(startIdx, i + 1);
+        return `{ theme: ${themeBlock} }`;
+      }
+    }
+  }
+  return null;
+}
+
 // Extract Google Font URLs from index.html <link> tags
 function extractFontUrls(html: string): string[] {
   const urls: string[] = [];
@@ -600,14 +629,32 @@ function fixMissingRouterImports(code: string): string {
 
   if (usedRouter.size === 0) return code;
 
-  // Find what's already imported from react-router-dom
-  const existingImport = code.match(/import\s*\{([^}]+)\}\s*from\s*['"]react-router-dom['"]/);
+  // Find what's already imported from react-router-dom (scan ALL import statements)
   const alreadyImported = new Set<string>();
-  if (existingImport) {
+  const importRe = /import\s*\{([^}]+)\}\s*from\s*['"]react-router-dom['"]/g;
+  let existingImport: RegExpExecArray | null = null;
+  let lastRouterImport: RegExpExecArray | null = null;
+  while ((existingImport = importRe.exec(code)) !== null) {
+    lastRouterImport = existingImport;
     existingImport[1].split(",").forEach((n) => {
       const trimmed = n.trim().split(/\s+as\s+/)[0].trim();
       if (trimmed) alreadyImported.add(trimmed);
     });
+  }
+  existingImport = lastRouterImport;
+
+  // Safety check: also scan ALL import statements (any module) for these identifiers
+  // to catch star imports, re-exports, aliased imports, or unconventional patterns
+  const allImportsRe = /import\s+(?:(?:\{([^}]+)\})|(?:\*\s+as\s+(\w+))|(?:(\w+)))\s+from\s+['"][^'"]+['"]/g;
+  let im: RegExpExecArray | null;
+  while ((im = allImportsRe.exec(code)) !== null) {
+    if (im[1]) {
+      // Named imports: import { a, b } from '...'
+      im[1].split(",").forEach((n) => {
+        const trimmed = n.trim().split(/\s+as\s+/)[0].trim();
+        if (trimmed) alreadyImported.add(trimmed);
+      });
+    }
   }
 
   // Find missing imports
@@ -650,11 +697,10 @@ export default function ReactProjectPreview({
     let deps: Record<string, string> = {
       "react-router-dom": "^6.20.0",
     };
-    const extResources: string[] = [
-      "https://cdn.tailwindcss.com",
-    ];
+    const extResources: string[] = [];
 
     let hasIndexCss = false;
+    let tailwindThemeConfig: string | null = null;
 
     // Collect all import sources from TSX/TS/JS files to auto-detect dependencies
     // the AI used but forgot to add to package.json
@@ -713,6 +759,19 @@ export default function ReactProjectPreview({
 
       if (
         normalizedPath === "/tailwind.config.ts" ||
+        normalizedPath === "/tailwind.config.js"
+      ) {
+        // Extract theme config so we can pass it to Tailwind CDN inline
+        tailwindThemeConfig = extractTailwindThemeConfig(code);
+        if (tailwindThemeConfig) {
+          console.log("[ReactPreview] Extracted Tailwind theme config:", tailwindThemeConfig);
+        } else {
+          console.warn("[ReactPreview] tailwind.config found but failed to extract theme config");
+        }
+        continue;
+      }
+
+      if (
         normalizedPath === "/vite.config.ts" ||
         normalizedPath === "/postcss.config.js" ||
         normalizedPath === "/tsconfig.json"
@@ -842,6 +901,16 @@ export default function ReactProjectPreview({
         sfFiles[filePath] = { ...fileObj, code: fixed };
         console.log("[router-fix] Injected router imports in:", filePath);
       }
+    }
+
+    // Inject Tailwind CDN + optional custom theme config.
+    // The CDN script must load first to define window.tailwind, then the config script
+    // sets custom colors/fonts so Tailwind CDN processes them natively.
+    extResources.push("https://cdn.tailwindcss.com");
+    if (tailwindThemeConfig) {
+      const configScript = `tailwind.config = ${tailwindThemeConfig};`;
+      console.log("[ReactPreview] Injecting Tailwind CDN config script");
+      extResources.push(`data:text/javascript;charset=utf-8,${encodeURIComponent(configScript)}`);
     }
 
     // Bridge App.tsx: imports CSS, scrolls to top on navigation, optionally navigates to a route, re-exports App
