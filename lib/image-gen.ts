@@ -230,7 +230,7 @@ async function compressImage(
  * Generate images via Gemini and upload to Vercel Blob.
  * Returns a map from marker string → blob URL.
  */
-const MAX_CONCURRENT = 3; // Limit parallel Gemini image API calls to avoid rate limiting
+const MAX_CONCURRENT = 20; // Parallel Gemini image API calls (Tier 3 supports 2000+ RPM)
 const MAX_RETRIES = 3;
 
 /** Simple delay helper */
