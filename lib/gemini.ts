@@ -1413,13 +1413,9 @@ function resolveCustomColors(files: Record<string, string>): Record<string, stri
     result[path] = fixed;
   }
 
-  // Also clean up the tailwind config to remove custom colors
-  if (result["/tailwind.config.ts"]) {
-    result["/tailwind.config.ts"] = result["/tailwind.config.ts"].replace(/colors\s*:\s*\{[^}]+\},?\n?/g, "");
-  }
-  if (result["/tailwind.config.js"]) {
-    result["/tailwind.config.js"] = result["/tailwind.config.js"].replace(/colors\s*:\s*\{[^}]+\},?\n?/g, "");
-  }
+  // Keep colors in tailwind.config.ts — the Tailwind CDN config injection
+  // in react-preview.tsx handles custom colors natively, so stripping them
+  // would break any usages that resolveCustomColors missed (nested objects, etc.)
 
   return result;
 }
