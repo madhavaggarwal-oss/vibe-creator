@@ -713,17 +713,27 @@ export default function ReactProjectPreview({
 
       // Scan source files for third-party imports (not relative paths)
       if (/\.(tsx?|jsx?)$/.test(normalizedPath)) {
-        const importRegex = /(?:import|from)\s+['"]([^./][^'"]*)['"]/g;
-        let importMatch;
-        while ((importMatch = importRegex.exec(code)) !== null) {
-          // Extract package name (handle scoped packages like @headlessui/react)
-          const raw = importMatch[1];
-          const pkgName = raw.startsWith("@")
-            ? raw.split("/").slice(0, 2).join("/")
-            : raw.split("/")[0];
-          // Exclude built-in packages already provided by Sandpack
-          if (pkgName !== "react" && pkgName !== "react-dom") {
-            importedPackages.add(pkgName);
+        // Match ES import/export statements. Uses statement-boundary anchors
+        // (^, ;, }) to avoid matching "from" in JSX text content.
+        const importRegex = /(?:^|;|\})\s*import\s+(?:[\s\S]*?\s+from\s+)?['"]([^./][^'"]*)['"]/gm;
+        const reExportRegex = /(?:^|;|\})\s*export\s+.*?\s+from\s+['"]([^./][^'"]*)['"]/gm;
+        const allRegexes = [importRegex, reExportRegex];
+        for (const regex of allRegexes) {
+          let importMatch;
+          while ((importMatch = regex.exec(code)) !== null) {
+            const raw = importMatch[1];
+            const pkgName = raw.startsWith("@")
+              ? raw.split("/").slice(0, 2).join("/")
+              : raw.split("/")[0];
+            // Validate: must be a plausible npm package name (lowercase, no spaces,
+            // only alphanumeric/hyphens/dots/underscores) and not react/react-dom
+            if (
+              pkgName !== "react" &&
+              pkgName !== "react-dom" &&
+              /^@?[a-z0-9][\w.\-]*(?:\/[a-z0-9][\w.\-]*)?$/.test(pkgName)
+            ) {
+              importedPackages.add(pkgName);
+            }
           }
         }
       }
