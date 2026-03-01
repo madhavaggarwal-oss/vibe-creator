@@ -608,13 +608,31 @@ ${code}`;
     fixed = fixed.replace(/^```(?:tsx?|jsx?|typescript|javascript)?\s*\n?/, "");
     fixed = fixed.replace(/\n?```\s*$/, "");
 
-    // Sanity check: the fix should be roughly the same size (not a partial rewrite)
-    if (fixed.length < code.length * 0.5 || fixed.length > code.length * 2) {
-      console.warn(`[llmFixFile] ${filename}: LLM response size suspicious (${fixed.length} vs ${code.length}), keeping original`);
-      return code;
+    // Validate the LLM output: if it compiles cleanly, accept it regardless of size.
+    // If it doesn't compile, only accept if it's better than the original (fewer errors).
+    const llmError = detectError(fixed);
+    if (llmError === null) {
+      // LLM output compiles cleanly — accept it
+      console.warn(`[llmFixFile] ${filename}: LLM fix compiles cleanly (${fixed.length} chars vs ${code.length} original)`);
+      return fixed;
     }
 
-    return fixed;
+    // LLM output doesn't compile either — check if the original also doesn't compile
+    const origError = detectError(code);
+    if (origError !== null) {
+      // Both broken, but LLM might have fixed some issues.
+      // Accept if the LLM output at least has valid bracket structure.
+      const llmBracketIssues = analyzeSyntax(fixed);
+      const origBracketIssues = analyzeSyntax(code);
+      if (llmBracketIssues.length < origBracketIssues.length) {
+        console.warn(`[llmFixFile] ${filename}: LLM fix has fewer bracket issues (${llmBracketIssues.length} vs ${origBracketIssues.length}), accepting`);
+        return fixed;
+      }
+    }
+
+    // LLM output is worse or no better — keep original
+    console.warn(`[llmFixFile] ${filename}: LLM fix still has errors (${llmError}), keeping original`);
+    return code;
   } catch (err) {
     console.warn(`[llmFixFile] ${filename}: LLM repair failed:`, err);
     return code;
@@ -787,11 +805,34 @@ export async function validateAndRepairFiles(
       continue;
     }
 
-    console.warn(
-      `[syntax-repair] ${path}: detected ${issues.length} issue(s): ${issues.map((i) => `${i.kind}(${i.direction}:${i.count})`).join(", ")}`
+    const issueDesc = issues.map((i) => `${i.kind}(${i.direction}:${i.count})`).join(", ");
+    console.warn(`[syntax-repair] ${path}: detected ${issues.length} issue(s): ${issueDesc}`);
+
+    // Check if there's an unterminated template/string — local bracket repair is
+    // unreliable in this case because the bracket counts are thrown off by the
+    // unterminated literal (everything after it is misinterpreted). Skip straight
+    // to LLM repair which can understand the semantic intent.
+    const hasUnterminatedLiteral = issues.some(
+      (i) =>
+        i.kind === "unterminated-template" ||
+        i.kind === "unterminated-string-single" ||
+        i.kind === "unterminated-string-double" ||
+        i.kind === "unterminated-block-comment"
     );
 
-    // Tier 1: local repair
+    if (hasUnterminatedLiteral) {
+      console.warn(`[syntax-repair] ${path}: unterminated literal detected, skipping local repair → LLM`);
+      result[path] = preFixed;
+      llmTasks.push({
+        path,
+        code: preFixed,
+        issues: issueDesc,
+        astOnly: true,
+      });
+      continue;
+    }
+
+    // Tier 1: local repair (only for bracket imbalances, not unterminated literals)
     const { code: repaired, remainingIssues } = attemptLocalRepair(preFixed);
 
     if (remainingIssues.length === 0) {
@@ -800,8 +841,11 @@ export async function validateAndRepairFiles(
       const codeError = detectError(repaired);
       if (codeError !== null) {
         console.warn(`[syntax-repair] ${path} still has error after local repair: ${codeError}`);
-        llmTasks.push({ path, code: repaired, issues: codeError, astOnly: true });
-        result[path] = repaired;
+        // Send ORIGINAL code to LLM, not the locally-repaired version.
+        // Local repair can corrupt code (e.g. appending }}} to balance brackets
+        // when the real issue is an unterminated template literal).
+        llmTasks.push({ path, code: preFixed, issues: codeError, astOnly: true });
+        result[path] = preFixed;
       } else {
         result[path] = repaired;
       }
@@ -812,11 +856,12 @@ export async function validateAndRepairFiles(
       `[syntax-repair] ${path}: ${remainingIssues.length} issue(s) remain after local repair: ${remainingIssues.map((i) => `${i.kind}(${i.direction}:${i.count})`).join(", ")}`
     );
 
-    // Queue for Tier 2 LLM repair
-    result[path] = repaired; // use local repair as starting point
+    // Queue for Tier 2 LLM repair — send ORIGINAL code, not the locally-repaired
+    // version which may have been corrupted by naive bracket-closing.
+    result[path] = preFixed;
     llmTasks.push({
       path,
-      code: repaired,
+      code: preFixed,
       issues: remainingIssues
         .map((i) => `${i.kind}: ${i.count} ${i.direction}`)
         .join("\n"),
@@ -854,6 +899,24 @@ export async function validateAndRepairFiles(
     for (const { path, code } of llmResults) {
       result[path] = code;
     }
+  }
+
+  // Final safety gate: log which files still have errors after all repair attempts.
+  // This gives clear visibility into what the user will see.
+  const stillBroken: string[] = [];
+  for (const [path, content] of Object.entries(result)) {
+    if (typeof content !== "string" || !/\.(tsx?|jsx?)$/.test(path)) continue;
+    const error = detectError(content);
+    if (error !== null) {
+      stillBroken.push(`  ${path}: ${error}`);
+    }
+  }
+  if (stillBroken.length > 0) {
+    console.error(
+      `[syntax-repair] WARNING: ${stillBroken.length} file(s) still have errors after all repair attempts:\n${stillBroken.join("\n")}`
+    );
+  } else {
+    console.log(`[syntax-repair] All ${Object.keys(result).length} files validated successfully`);
   }
 
   return result;
