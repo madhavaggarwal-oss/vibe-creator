@@ -1,4 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { parse as babelParse } from "@babel/parser";
+import * as babel from "@babel/core";
+// @ts-expect-error — no type declarations for Babel presets
+import presetTypescript from "@babel/preset-typescript";
+// @ts-expect-error — no type declarations for Babel presets
+import presetReact from "@babel/preset-react";
 
 // ---------------------------------------------------------------------------
 // Tier 1.5 — AST parse validation (catches errors invisible to bracket analysis)
@@ -15,12 +21,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
  */
 export function tryParseTSX(code: string): string | null {
   try {
-    // Dynamic require so that if @babel/parser is somehow missing,
-    // we degrade gracefully instead of crashing the whole module.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { parse } = require("@babel/parser") as typeof import("@babel/parser");
-
-    parse(code, {
+    babelParse(code, {
       sourceType: "module",
       plugins: ["jsx", "typescript"],
       errorRecovery: false,
@@ -45,14 +46,14 @@ export function tryParseTSX(code: string): string | null {
  */
 export function trySandpackTranspile(code: string): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const babel = require("@babel/core") as typeof import("@babel/core");
-
+    // Static imports above ensure the bundler traces all Babel packages.
+    // Passing preset references directly (not string names) avoids Babel's
+    // internal require() resolution, which fails in Vercel's serverless env.
     babel.transformSync(code, {
       filename: "file.tsx",
       presets: [
-        ["@babel/preset-typescript", { isTSX: true, allExtensions: true }],
-        ["@babel/preset-react", { runtime: "automatic" }],
+        [presetTypescript, { isTSX: true, allExtensions: true }],
+        [presetReact, { runtime: "automatic" }],
       ],
       sourceType: "module",
       code: false,
