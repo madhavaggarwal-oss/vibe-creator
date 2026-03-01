@@ -1421,6 +1421,37 @@ function resolveCustomColors(files: Record<string, string>): Record<string, stri
 }
 
 /**
+ * Sanitize CSS files by stripping directives that Sandpack's PostCSS cannot handle.
+ * The AI sometimes generates @tailwind, @apply, or @layer directives despite being
+ * told not to — these cause "/src/index.css: 1:1: Unknown word" errors in Sandpack.
+ */
+function sanitizeCssFiles(files: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [path, content] of Object.entries(files)) {
+    if (!path.endsWith(".css")) {
+      result[path] = content;
+      continue;
+    }
+    let css = content;
+    // Strip @tailwind directives (e.g. @tailwind base; @tailwind components; @tailwind utilities;)
+    css = css.replace(/^@tailwind\s+[^;]+;\s*$/gm, "");
+    // Strip @import 'tailwindcss/...' or @import "tailwindcss/..."
+    css = css.replace(/^@import\s+['"]tailwindcss\/[^'"]+['"];\s*$/gm, "");
+    // Strip @apply directives (replace entire rule if only @apply, or just the line)
+    css = css.replace(/^\s*@apply\s+[^;]+;\s*$/gm, "");
+    // Strip @layer directives (unwrap the content inside)
+    css = css.replace(/@layer\s+\w+\s*\{([^}]*)\}/g, "$1");
+    // Clean up excessive blank lines left behind
+    css = css.replace(/\n{3,}/g, "\n\n").trim();
+    if (css !== content) {
+      console.log(`[sanitizeCssFiles] Cleaned invalid directives from ${path}`);
+    }
+    result[path] = css;
+  }
+  return result;
+}
+
+/**
  * Fix conflicting className on <img> tags.
  * Gemini tends to append "object-cover w-full h-full" to ALL images,
  * even logos/icons that already have fixed sizing (h-8 w-auto object-contain).
@@ -1608,7 +1639,8 @@ export async function editFunnel(
       codeFiles[k] = v;
     }
   }
-  const fixedFiles = fixImageClassNames(codeFiles);
+  const sanitizedFiles = sanitizeCssFiles(codeFiles);
+  const fixedFiles = fixImageClassNames(sanitizedFiles);
   const resolvedFiles = resolveCustomColors(fixedFiles);
   const repairedFiles = await validateAndRepairFiles(resolvedFiles);
 
@@ -1792,9 +1824,12 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
   const filesWithImages = await processImageMarkers(files);
   console.log("[generateFunnel] Image markers done");
 
+  // Sanitize CSS files (strip @tailwind/@apply/@layer directives that break Sandpack)
+  const sanitizedFiles = sanitizeCssFiles(filesWithImages);
+
   // Fix conflicting image classNames (Gemini appends "object-cover w-full h-full" to everything)
   console.log("[generateFunnel] Fixing image classNames...");
-  const fixedFiles = fixImageClassNames(filesWithImages);
+  const fixedFiles = fixImageClassNames(sanitizedFiles);
   console.log("[generateFunnel] Image classNames fixed");
 
   // Resolve custom Tailwind colors (bg-primary → bg-[#hex]) since CDN can't read config
