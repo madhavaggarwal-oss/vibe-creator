@@ -309,6 +309,100 @@ function extractTailwindThemeConfig(configCode: string): string | null {
   return null;
 }
 
+/**
+ * Build a reverse map from hex color values to their palette-key paths
+ * from a tailwind.config.ts file. For example:
+ *   { '#57534e' => 'stone-600', '#ea580c' => 'accent-600', ... }
+ *
+ * This is used to fix malformed AI-generated classes like `bg-accent-[#57534e]`
+ * → `bg-stone-600` by looking up which palette actually contains that hex value.
+ */
+function buildHexToPaletteMap(configCode: string): Map<string, string> {
+  const hexMap = new Map<string, string>();
+
+  // Match color palette blocks: colorName: { key: '#hex', ... }
+  // This handles both flat palettes and nested extend.colors
+  const paletteRegex = /(\w+)\s*:\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g;
+  let paletteMatch;
+
+  // First, find the colors block
+  const colorsMatch = configCode.match(/colors\s*:\s*\{/);
+  if (!colorsMatch || colorsMatch.index === undefined) return hexMap;
+
+  // Extract the colors block content
+  let depth = 0;
+  let colorsStart = -1;
+  let colorsBlock = "";
+  for (let i = colorsMatch.index + colorsMatch[0].length - 1; i < configCode.length; i++) {
+    if (configCode[i] === "{") {
+      if (depth === 0) colorsStart = i;
+      depth++;
+    } else if (configCode[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        colorsBlock = configCode.slice(colorsStart + 1, i);
+        break;
+      }
+    }
+  }
+
+  if (!colorsBlock) return hexMap;
+
+  // Now find each named palette inside the colors block
+  while ((paletteMatch = paletteRegex.exec(colorsBlock)) !== null) {
+    const paletteName = paletteMatch[1];
+    const paletteBody = paletteMatch[2];
+
+    // Extract key-value pairs: 600: '#57534e' or '600': '#57534e'
+    const kvRegex = /['"]?(\w+)['"]?\s*:\s*['"]([#\w]+)['"]/g;
+    let kvMatch;
+    while ((kvMatch = kvRegex.exec(paletteBody)) !== null) {
+      const key = kvMatch[1];
+      const hexValue = kvMatch[2].toLowerCase();
+      hexMap.set(hexValue, `${paletteName}-${key}`);
+    }
+  }
+
+  return hexMap;
+}
+
+/**
+ * Fix malformed Tailwind classes where the AI uses `palette-[#hex]` syntax
+ * instead of proper palette keys. For example:
+ *   bg-accent-[#57534e]  →  bg-stone-600
+ *   text-accent-[#44403c]/80  →  text-stone-700/80
+ *   hover:bg-accent-[#57534e]  →  hover:bg-stone-600
+ *
+ * If the hex is not found in any palette, falls back to a valid arbitrary
+ * value: bg-accent-[#57534e] → bg-[#57534e]
+ */
+function fixMalformedPaletteClasses(
+  code: string,
+  hexMap: Map<string, string>
+): string {
+  if (hexMap.size === 0) return code;
+
+  // Match patterns like: (prefix:)?utility-paletteName-[#hex](/opacity)?
+  // where utility is bg, text, border, shadow, ring, from, to, via, fill, stroke, etc.
+  // and prefix can be hover:, focus:, active:, sm:, md:, lg:, etc.
+  return code.replace(
+    /(\b(?:[\w-]+:)*(?:bg|text|border|shadow|ring|outline|from|to|via|fill|stroke|divide|placeholder|decoration|accent|caret)-)(\w+)-\[(#[0-9a-fA-F]{3,8})\](\/\d+)?/g,
+    (_match, utilityPrefix, paletteName, hexValue, opacity) => {
+      const normalizedHex = hexValue.toLowerCase();
+      const paletteKey = hexMap.get(normalizedHex);
+      const opacitySuffix = opacity || "";
+
+      if (paletteKey) {
+        // Found in a palette — use the correct palette-key reference
+        return `${utilityPrefix}${paletteKey}${opacitySuffix}`;
+      }
+      // Not found in any palette — fall back to valid arbitrary value
+      // e.g., bg-accent-[#57534e] → bg-[#57534e]
+      return `${utilityPrefix}[${hexValue}]${opacitySuffix}`;
+    }
+  );
+}
+
 // Extract Google Font URLs from index.html <link> tags
 function extractFontUrls(html: string): string[] {
   const urls: string[] = [];
@@ -701,6 +795,7 @@ export default function ReactProjectPreview({
 
     let hasIndexCss = false;
     let tailwindThemeConfig: string | null = null;
+    let hexToPaletteMap = new Map<string, string>();
 
     // Collect all import sources from TSX/TS/JS files to auto-detect dependencies
     // the AI used but forgot to add to package.json
@@ -777,6 +872,11 @@ export default function ReactProjectPreview({
           console.log("[ReactPreview] Extracted Tailwind theme config:", tailwindThemeConfig);
         } else {
           console.warn("[ReactPreview] tailwind.config found but failed to extract theme config");
+        }
+        // Build reverse hex→palette-key map for fixing malformed classes
+        hexToPaletteMap = buildHexToPaletteMap(code);
+        if (hexToPaletteMap.size > 0) {
+          console.log("[ReactPreview] Built hex-to-palette map:", Object.fromEntries(hexToPaletteMap));
         }
         continue;
       }
@@ -910,6 +1010,19 @@ export default function ReactProjectPreview({
       if (fixed !== fileObj.code) {
         sfFiles[filePath] = { ...fileObj, code: fixed };
         console.log("[router-fix] Injected router imports in:", filePath);
+      }
+    }
+
+    // Fix malformed Tailwind palette classes: bg-accent-[#57534e] → bg-stone-600
+    // Must run after all files are collected but before Sandpack renders.
+    if (hexToPaletteMap.size > 0) {
+      for (const [filePath, fileObj] of Object.entries(sfFiles)) {
+        if (!/\.(tsx|jsx)$/.test(filePath)) continue;
+        const fixed = fixMalformedPaletteClasses(fileObj.code, hexToPaletteMap);
+        if (fixed !== fileObj.code) {
+          sfFiles[filePath] = { ...fileObj, code: fixed };
+          console.log("[palette-fix] Fixed malformed palette classes in:", filePath);
+        }
       }
     }
 
