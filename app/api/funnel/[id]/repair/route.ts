@@ -8,6 +8,8 @@ import {
   llmFixFile,
 } from "@/lib/syntax-repair";
 
+export const maxDuration = 120;
+
 /**
  * Build a rich error context string that helps the LLM understand the error
  * by including the error message, the offending line(s), and surrounding context.

@@ -5,6 +5,8 @@ import { processImageMarkers } from "@/lib/image-gen";
 import { createStreamingResponse } from "@/lib/stream-response";
 import { getCurrentUserId } from "@/lib/supabase/server";
 
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   const userId = await getCurrentUserId();
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });

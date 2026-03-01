@@ -3,6 +3,8 @@ import { getFunnel, saveFunnel, deleteSnapshot } from "@/lib/storage";
 import { generateImagesForFiles } from "@/lib/image-gen";
 import { getCurrentUserId } from "@/lib/supabase/server";
 
+export const maxDuration = 300;
+
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

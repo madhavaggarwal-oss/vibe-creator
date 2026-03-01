@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scrapeUrl } from "@/lib/firecrawl";
 
+export const maxDuration = 120;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
