@@ -14,6 +14,7 @@ import "highlight.js/styles/github-dark.css";
 import { processImageFiles, type PendingImage } from "@/lib/image-utils";
 import type { ChatMessage } from "@/lib/storage";
 import { readStreamResponse } from "@/lib/stream-response";
+import { consumePendingGeneration } from "@/lib/pending-generation";
 import ImageUpload from "@/components/image-upload";
 
 hljs.registerLanguage("xml", xml);
@@ -836,11 +837,10 @@ export default function GenerateResultPage() {
 
   useEffect(() => {
     if (rawId === "new") {
-      // New generation flow
-      const stored = sessionStorage.getItem("vibe-pending-generation");
-      if (stored) {
-        sessionStorage.removeItem("vibe-pending-generation");
-        const { prompt, model, images, scrapeData, scrapeUrl, isImageClone } = JSON.parse(stored);
+      // New generation flow — consumePendingGeneration checks in-memory first, then sessionStorage
+      const pendingData = consumePendingGeneration();
+      if (pendingData) {
+        const { prompt, model, images, scrapeData, scrapeUrl, isImageClone } = pendingData;
         setPendingPrompt(prompt);
         setPendingTimestamp(new Date().toISOString());
         setPendingModel(model);
@@ -884,6 +884,10 @@ export default function GenerateResultPage() {
                 setPendingPromptImages(scrapeImages);
               }
 
+              // Strip screenshot from scrapeData — it's already sent via `images`.
+              // This avoids duplicating ~2MB of base64 and keeps us under Vercel's 4.5MB body limit.
+              const { screenshot: _s, ...scrapeDataLite } = scrapeResult;
+
               // Now generate with scrape data
               const genRes = await fetch("/api/generate", {
                 method: "POST",
@@ -892,7 +896,7 @@ export default function GenerateResultPage() {
                   prompt,
                   model,
                   images: scrapeImages,
-                  scrapeData: scrapeResult,
+                  scrapeData: scrapeDataLite,
                 }),
                 signal: controller.signal,
               });

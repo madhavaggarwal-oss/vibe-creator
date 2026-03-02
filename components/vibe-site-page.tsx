@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { MODELS } from "./model-data";
 import { processImageFiles, processCloneImageFiles, type PendingImage } from "@/lib/image-utils";
 import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
+import { setPendingGeneration } from "@/lib/pending-generation";
 import ImageUpload from "./image-upload";
 import { createClient } from "@/lib/supabase/client";
 
@@ -113,52 +114,39 @@ export default function VibeSitePage() {
 
     console.log(`[handleSubmit] Pipeline routing — hasUrl: ${hasUrl}, hasImages: ${hasImages} (${imageDataUrls.length}), isImageClone: ${isImageClone}, prompt: "${trimmed.slice(0, 80)}"`);
 
-    try {
-      if (hasUrl) {
-        // Tier 1: URL detected → existing scrape+clone pipeline
-        const extractedUrl = httpMatch ? httpMatch[0] : bareMatch![1];
-        const fullUrl = extractedUrl.startsWith("http") ? extractedUrl : `https://${extractedUrl}`;
-        console.log(`[handleSubmit] → Pipeline: URL_CLONE | Sub: scrape+generate | URL: ${fullUrl}`);
-        sessionStorage.setItem(
-          "vibe-pending-generation",
-          JSON.stringify({
-            prompt: trimmed,
-            model,
-            images: [],
-            scrapeUrl: fullUrl,
-          })
-        );
-      } else if (isImageClone) {
-        // Tier 2: Images + (no text OR clone-intent keywords) → image clone pipeline
-        console.log(`[handleSubmit] → Pipeline: IMAGE_CLONE | Sub: direct generate | Images: ${imageDataUrls.length}, hasText: ${!!trimmed}`);
-        const cloneImages = imageDataUrls.slice(0, MAX_CLONE_IMAGES);
-        const clonePrompt = trimmed || "Clone this website exactly as shown in the screenshots.";
-        sessionStorage.setItem(
-          "vibe-pending-generation",
-          JSON.stringify({
-            prompt: clonePrompt,
-            model,
-            images: cloneImages,
-            isImageClone: true,
-          })
-        );
-      } else {
-        // Tier 3: Normal generation
-        console.log(`[handleSubmit] → Pipeline: NORMAL_GENERATION | Sub: ${imageDataUrls.length > 0 ? 'with reference images' : 'text only'}`);
-        sessionStorage.setItem(
-          "vibe-pending-generation",
-          JSON.stringify({
-            prompt: trimmed,
-            model,
-            images: imageDataUrls,
-          })
-        );
-      }
-    } catch {
-      // sessionStorage might fail in some contexts
+    if (hasUrl) {
+      // Tier 1: URL detected → existing scrape+clone pipeline
+      const extractedUrl = httpMatch ? httpMatch[0] : bareMatch![1];
+      const fullUrl = extractedUrl.startsWith("http") ? extractedUrl : `https://${extractedUrl}`;
+      console.log(`[handleSubmit] → Pipeline: URL_CLONE | Sub: scrape+generate | URL: ${fullUrl}`);
+      setPendingGeneration({
+        prompt: trimmed,
+        model,
+        images: [],
+        scrapeUrl: fullUrl,
+      });
+    } else if (isImageClone) {
+      // Tier 2: Images + (no text OR clone-intent keywords) → image clone pipeline
+      console.log(`[handleSubmit] → Pipeline: IMAGE_CLONE | Sub: direct generate | Images: ${imageDataUrls.length}, hasText: ${!!trimmed}`);
+      const cloneImages = imageDataUrls.slice(0, MAX_CLONE_IMAGES);
+      const clonePrompt = trimmed || "Clone this website exactly as shown in the screenshots.";
+      setPendingGeneration({
+        prompt: clonePrompt,
+        model,
+        images: cloneImages,
+        isImageClone: true,
+      });
+    } else {
+      // Tier 3: Normal generation
+      console.log(`[handleSubmit] → Pipeline: NORMAL_GENERATION | Sub: ${imageDataUrls.length > 0 ? 'with reference images' : 'text only'}`);
+      setPendingGeneration({
+        prompt: trimmed,
+        model,
+        images: imageDataUrls,
+      });
     }
 
-    window.location.href = "/generate/new";
+    router.push("/generate/new");
   };
 
   const formatDate = formatRelativeDate;
