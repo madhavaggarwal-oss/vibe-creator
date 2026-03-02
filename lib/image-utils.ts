@@ -13,7 +13,7 @@ const MAX_DIMENSION = 1024;
 const CLONE_MAX_DIMENSION = 2048;
 const JPEG_QUALITY = 0.8;
 
-function resizeImage(file: File, maxDimension: number = MAX_DIMENSION): Promise<string> {
+function resizeImage(file: File, maxDimension: number = MAX_DIMENSION, forceJpeg: boolean = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -45,7 +45,7 @@ function resizeImage(file: File, maxDimension: number = MAX_DIMENSION): Promise<
 
       ctx.drawImage(img, 0, 0, width, height);
 
-      const isPng = file.type === "image/png";
+      const isPng = !forceJpeg && file.type === "image/png";
       const dataUrl = canvas.toDataURL(
         isPng ? "image/png" : "image/jpeg",
         isPng ? undefined : JPEG_QUALITY
@@ -83,7 +83,7 @@ export async function processCloneImageFiles(
 
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
-    const dataUrl = await resizeImage(file, CLONE_MAX_DIMENSION);
+    const dataUrl = await resizeImage(file, CLONE_MAX_DIMENSION, true);
     results.push({ dataUrl, name: file.name });
   }
 

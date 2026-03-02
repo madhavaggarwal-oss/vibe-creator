@@ -22,12 +22,17 @@ let pending: PendingGeneration | null = null;
 export function setPendingGeneration(data: PendingGeneration): void {
   pending = data;
 
-  // Best-effort sessionStorage fallback so the data survives a page refresh
-  // during navigation. Silently ignore quota errors from large image payloads.
+  // Best-effort sessionStorage fallback so the data survives full-page navigation.
+  // Clear first so stale data never persists if the new write fails (quota exceeded).
+  try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch {
-    // Quota exceeded (large base64 images) — OK, in-memory is primary
+    // Quota exceeded (large base64 images) — in-memory is primary.
+    // Navigation will use window.location.href (full reload), so for large
+    // payloads that don't fit in sessionStorage, the data will be lost.
+    // This only affects image clones with very large screenshots.
+    console.warn("[pending-generation] sessionStorage write failed (quota exceeded). Image clone data may be lost on navigation.");
   }
 }
 
