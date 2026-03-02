@@ -1,11 +1,5 @@
 {
   "functions": {
-    "app/api/generate/route.ts": {
-      "maxDuration": 800
-    },
-    "app/api/chat/route.ts": {
-      "maxDuration": 800
-    },
     "app/api/funnel/*/generate-images/route.ts": {
       "maxDuration": 120
     },

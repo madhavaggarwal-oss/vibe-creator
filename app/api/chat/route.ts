@@ -6,7 +6,7 @@ import { createStreamingResponse } from "@/lib/stream-response";
 import { getCurrentUserId } from "@/lib/supabase/server";
 import { logGeneration } from "@/lib/generation-log";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const userId = await getCurrentUserId();
