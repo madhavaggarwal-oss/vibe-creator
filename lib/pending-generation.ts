@@ -1,9 +1,9 @@
 /**
- * In-memory store for passing generation data between the home page and
- * the generate page during client-side navigation (router.push).
+ * Typed wrapper around sessionStorage for passing generation data between
+ * the home page and the generate page across full-page navigation.
  *
- * This avoids sessionStorage's ~5MB limit which breaks image clone payloads
- * that contain large base64 data URLs.
+ * Also keeps an in-memory copy so client-side navigations (if used in the
+ * future) work without hitting sessionStorage's ~5MB limit.
  */
 
 const STORAGE_KEY = "vibe-pending-generation";

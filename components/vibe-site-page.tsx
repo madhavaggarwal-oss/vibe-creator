@@ -146,7 +146,7 @@ export default function VibeSitePage() {
       });
     }
 
-    router.push("/generate/new");
+    window.location.href = "/generate/new";
   };
 
   const formatDate = formatRelativeDate;

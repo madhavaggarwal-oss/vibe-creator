@@ -90,7 +90,7 @@ export function createStreamingResponse(
  */
 export async function readStreamResponse<T = unknown>(
   response: Response,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string, data?: unknown) => void
 ): Promise<T> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -113,7 +113,7 @@ export async function readStreamResponse<T = unknown>(
         const event: StreamEvent = JSON.parse(line);
         switch (event.type) {
           case "progress":
-            onProgress?.(event.message || "");
+            onProgress?.(event.message || "", event.data);
             break;
           case "result":
             result = event.data as T;

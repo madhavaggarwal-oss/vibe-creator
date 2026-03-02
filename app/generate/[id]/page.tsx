@@ -730,7 +730,7 @@ export default function GenerateResultPage() {
   }, [fetchCalendars, fetchSlots]);
 
   const startGeneration = useCallback(
-    async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>, isImageClone?: boolean) => {
+    async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>, isImageClone?: boolean, scrapeUrl?: string) => {
       setGeneratingState("generating");
       setGenerationStep(0);
       setGenerationProgress(0);
@@ -761,7 +761,7 @@ export default function GenerateResultPage() {
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, model, images, scrapeData, isImageClone }),
+          body: JSON.stringify({ prompt, model, images, scrapeData, isImageClone, scrapeUrl }),
           signal: controller.signal,
         });
 
@@ -770,7 +770,18 @@ export default function GenerateResultPage() {
           throw new Error(errData.error || "Failed to generate");
         }
 
-        const data = await readStreamResponse<{ id: string; fileCount: number; hasCalendar: boolean }>(res);
+        const data = await readStreamResponse<{ id: string; fileCount: number; hasCalendar: boolean }>(
+          res,
+          (_msg: string, eventData?: unknown) => {
+            // Capture screenshot from server-side scrape for UI display
+            if (_msg === "scrape-complete" && eventData && typeof eventData === "object" && "screenshot" in eventData) {
+              const screenshot = (eventData as { screenshot: string }).screenshot;
+              if (screenshot) {
+                setPendingPromptImages([screenshot]);
+              }
+            }
+          }
+        );
 
         // Finish progress
         if (progressTimerRef.current) clearInterval(progressTimerRef.current);
@@ -850,103 +861,8 @@ export default function GenerateResultPage() {
         setLoading(false);
 
         if (scrapeUrl) {
-          // Scrape first, then generate with scrape data
-          const controller = new AbortController();
-          generateAbortRef.current = controller;
-          (async () => {
-            setGeneratingState("generating");
-            setGenerationStep(0);
-            setGenerationProgress(0);
-            let step = 0;
-            stepTimerRef.current = setInterval(() => {
-              step = (step + 1) % GENERATION_STEPS.length;
-              setGenerationStep(step);
-            }, 3500);
-            let progress = 0;
-            progressTimerRef.current = setInterval(() => {
-              progress += 0.3 + Math.random() * 0.4;
-              if (progress > 85) progress = 85;
-              setGenerationProgress(progress);
-            }, 200);
-
-            try {
-              const scrapeRes = await fetch("/api/scrape", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url: scrapeUrl }),
-                signal: controller.signal,
-              });
-              const scrapeResult = await scrapeRes.json();
-              if (!scrapeRes.ok) throw new Error(scrapeResult.error || "Failed to scrape URL");
-
-              const scrapeImages = scrapeResult.screenshot ? [scrapeResult.screenshot] : [];
-              if (scrapeImages.length > 0) {
-                setPendingPromptImages(scrapeImages);
-              }
-
-              // Strip screenshot from scrapeData — it's already sent via `images`.
-              // This avoids duplicating ~2MB of base64 and keeps us under Vercel's 4.5MB body limit.
-              const { screenshot: _s, ...scrapeDataLite } = scrapeResult;
-
-              // Now generate with scrape data
-              const genRes = await fetch("/api/generate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  prompt,
-                  model,
-                  images: scrapeImages,
-                  scrapeData: scrapeDataLite,
-                }),
-                signal: controller.signal,
-              });
-              if (!genRes.ok) {
-                const errData = await genRes.json().catch(() => ({ error: "Failed to generate" }));
-                throw new Error(errData.error || "Failed to generate");
-              }
-              const genData = await readStreamResponse<{ id: string; fileCount: number; hasCalendar: boolean }>(genRes);
-
-              if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-              if (stepTimerRef.current) clearInterval(stepTimerRef.current);
-              setGenerationProgress(100);
-              await new Promise((r) => setTimeout(r, 600));
-
-              window.history.replaceState(null, "", `/generate/${genData.id}`);
-              const funnelRes = await fetch(`/api/funnel/${genData.id}`);
-              if (!funnelRes.ok) throw new Error("Failed to load funnel");
-              const funnelData = await funnelRes.json();
-
-              setFunnel(funnelData);
-              setChatMessages(funnelData.chatHistory || []);
-              setEditModel(funnelData.model);
-              setGeneratingState("idle");
-              setLoading(false);
-              playChime();
-
-              // Handle calendar detection
-              initCalendarFlow(funnelData, genData.id);
-
-              // Capture snapshot after Sandpack renders
-              captureSnapshot(genData.id);
-            } catch (err: unknown) {
-              if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-              if (stepTimerRef.current) clearInterval(stepTimerRef.current);
-              if (err instanceof DOMException && err.name === "AbortError") {
-                setGeneratingState("aborted");
-                setHasCalendar(false);
-                setCalendarList([]);
-                setSelectedCalendarId(null);
-                setSelectedCalendarName(null);
-                setCalendarSlots(null);
-              } else {
-                const message = err instanceof Error ? err.message : "Something went wrong";
-                setError(message);
-                setGeneratingState("error");
-              }
-            } finally {
-              generateAbortRef.current = null;
-            }
-          })();
+          // URL clone: server scrapes internally, client just sends the URL
+          startGeneration(prompt, model, undefined, undefined, false, scrapeUrl);
         } else if (isImageClone) {
           // Image clone: skip Firecrawl, generate directly with isImageClone flag
           startGeneration(prompt, model, images, undefined, true);
