@@ -731,6 +731,15 @@ export default function GenerateResultPage() {
 
   const startGeneration = useCallback(
     async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>, isImageClone?: boolean, scrapeUrl?: string) => {
+      console.log("[startGeneration] Called with:", {
+        prompt: prompt?.slice(0, 50),
+        model,
+        imageCount: images?.length ?? 0,
+        imageSizes: images?.map((img) => `${Math.round(img.length / 1024)}KB`),
+        isImageClone,
+        scrapeUrl,
+        hasScrapeData: !!scrapeData,
+      });
       setGeneratingState("generating");
       setGenerationStep(0);
       setGenerationProgress(0);
@@ -765,8 +774,11 @@ export default function GenerateResultPage() {
           signal: controller.signal,
         });
 
+        console.log("[startGeneration] API response status:", res.status);
+
         if (!res.ok) {
           const errData = await res.json().catch(() => ({ error: "Failed to generate" }));
+          console.error("[startGeneration] API error:", errData);
           throw new Error(errData.error || "Failed to generate");
         }
 
@@ -850,27 +862,38 @@ export default function GenerateResultPage() {
     if (rawId === "new") {
       // New generation flow — consumePendingGeneration checks in-memory first, then sessionStorage
       const pendingData = consumePendingGeneration();
+      console.log("[Generate] consumePendingGeneration:", pendingData ? {
+        prompt: pendingData.prompt?.slice(0, 50),
+        model: pendingData.model,
+        imageCount: pendingData.images?.length ?? 0,
+        imageSizes: pendingData.images?.map((img) => `${Math.round(img.length / 1024)}KB`),
+        scrapeUrl: pendingData.scrapeUrl,
+        isImageClone: pendingData.isImageClone,
+        hasScrapeData: !!pendingData.scrapeData,
+      } : "NULL — no pending data");
       if (pendingData) {
         const { prompt, model, images, scrapeData, scrapeUrl, isImageClone } = pendingData;
         setPendingPrompt(prompt);
         setPendingTimestamp(new Date().toISOString());
         setPendingModel(model);
         if (Array.isArray(images) && images.length > 0) {
+          console.log("[Generate] Setting pendingPromptImages:", images.length, "images");
           setPendingPromptImages(images);
         }
         setLoading(false);
 
         if (scrapeUrl) {
-          // URL clone: server scrapes internally, client just sends the URL
+          console.log("[Generate] Starting URL clone flow with scrapeUrl:", scrapeUrl);
           startGeneration(prompt, model, undefined, undefined, false, scrapeUrl);
         } else if (isImageClone) {
-          // Image clone: skip Firecrawl, generate directly with isImageClone flag
+          console.log("[Generate] Starting IMAGE CLONE flow with", images?.length, "images");
           startGeneration(prompt, model, images, undefined, true);
         } else {
+          console.log("[Generate] Starting NORMAL generation flow with", images?.length ?? 0, "images");
           startGeneration(prompt, model, images, scrapeData || undefined);
         }
       } else {
-        // No pending data, go back
+        console.warn("[Generate] No pending data found — redirecting to home");
         router.replace("/");
       }
       return;

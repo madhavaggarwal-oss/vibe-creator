@@ -4,6 +4,37 @@ import { processImageMarkers } from "./image-gen";
 import { getActiveTrace } from "./langfuse";
 import { validateAndRepairFiles } from "./syntax-repair";
 
+const RETRY_DELAYS = [3000, 6000, 12000]; // 3s, 6s, 12s
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isRetryable =
+        error instanceof Error &&
+        (error.message.includes("503") ||
+          error.message.includes("Service Unavailable") ||
+          error.message.includes("overloaded") ||
+          error.message.includes("high demand") ||
+          error.message.includes("429") ||
+          error.message.includes("RESOURCE_EXHAUSTED"));
+
+      if (!isRetryable || attempt >= RETRY_DELAYS.length || signal?.aborted) {
+        throw error;
+      }
+
+      console.warn(
+        `[Gemini] Retryable error (attempt ${attempt + 1}/${RETRY_DELAYS.length}): ${error.message}. Retrying in ${RETRY_DELAYS[attempt] / 1000}s...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+    }
+  }
+}
+
 function imagesToParts(images: string[]): Part[] {
   return images.map((dataUrl) => {
     const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
@@ -1596,7 +1627,10 @@ export async function editFunnel(
     ),
   });
 
-  const result = await model.generateContent(contentParts, signal ? { signal } : undefined);
+  const result = await withRetry(
+    () => model.generateContent(contentParts, signal ? { signal } : undefined),
+    signal
+  );
 
   const response = result.response;
   const text = response.text();
@@ -1763,7 +1797,10 @@ ${prompt || "Clone this website exactly as shown in the screenshot."}`;
   });
 
   // Pass abort signal to the Gemini API so the request is cancelled if the client disconnects
-  const result = await model.generateContent(contentParts, signal ? { signal } : undefined);
+  const result = await withRetry(
+    () => model.generateContent(contentParts, signal ? { signal } : undefined),
+    signal
+  );
 
   const response = result.response;
   const finishReason = response.candidates?.[0]?.finishReason;

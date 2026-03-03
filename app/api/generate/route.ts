@@ -28,6 +28,16 @@ export async function POST(request: NextRequest) {
     ? images.filter((i: unknown) => typeof i === "string").slice(0, MAX_IMAGES)
     : [];
 
+  console.log("[Generate API] Request received:", {
+    prompt: prompt?.slice(0, 50),
+    model: modelId,
+    imageCount: imageList.length,
+    imageSizes: imageList.map((img: string) => `${Math.round(img.length / 1024)}KB`),
+    isImageClone: !!isImageClone,
+    scrapeUrl: scrapeUrl || null,
+    hasScrapeData: !!scrapeData,
+  });
+
   return createStreamingResponse(async (send) => {
     try {
       let finalImages = imageList;

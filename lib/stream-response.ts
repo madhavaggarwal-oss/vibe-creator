@@ -109,27 +109,23 @@ export async function readStreamResponse<T = unknown>(
 
     for (const line of lines) {
       if (!line.trim()) continue;
+      let event: StreamEvent;
       try {
-        const event: StreamEvent = JSON.parse(line);
-        switch (event.type) {
-          case "progress":
-            onProgress?.(event.message || "", event.data);
-            break;
-          case "result":
-            result = event.data as T;
-            break;
-          case "error":
-            throw new Error(event.message || "Stream error");
-          case "heartbeat":
-            // Ignore heartbeats
-            break;
-        }
-      } catch (e) {
-        if (e instanceof Error && e.message !== "Stream error") {
-          // JSON parse error — ignore malformed lines
-        } else {
-          throw e;
-        }
+        event = JSON.parse(line);
+      } catch {
+        continue; // Skip malformed JSON lines
+      }
+      switch (event.type) {
+        case "progress":
+          onProgress?.(event.message || "", event.data);
+          break;
+        case "result":
+          result = event.data as T;
+          break;
+        case "error":
+          throw new Error(event.message || "Stream error");
+        case "heartbeat":
+          break;
       }
     }
   }
