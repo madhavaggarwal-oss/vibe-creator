@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { editFunnel } from "@/lib/gemini";
+import { editFunnel as geminiEditFunnel } from "@/lib/gemini";
 import { getFunnel, saveFunnel, isReactProject, deleteSnapshot } from "@/lib/storage";
 import { processImageMarkers } from "@/lib/image-gen";
 import { createStreamingResponse } from "@/lib/stream-response";
@@ -45,6 +45,13 @@ export async function POST(request: NextRequest) {
   return createStreamingResponse(async (send) => {
     try {
       send({ type: "progress", message: "Editing with AI..." });
+
+      // Route to the correct provider based on model ID
+      const provider = modelId.startsWith("gpt-") ? "openai" : "gemini";
+      console.log(`[Chat API] Provider routing: model=${modelId} → provider=${provider}`);
+      const editFunnel = provider === "openai"
+        ? (await import("@/lib/openai")).editFunnel
+        : geminiEditFunnel;
 
       const result = await editFunnel(
         funnel.files!,

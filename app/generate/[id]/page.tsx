@@ -16,6 +16,7 @@ import type { ChatMessage } from "@/lib/storage";
 import { readStreamResponse } from "@/lib/stream-response";
 import { consumePendingGeneration } from "@/lib/pending-generation";
 import ImageUpload from "@/components/image-upload";
+import { DEFAULT_MODEL, DUAL_MODEL } from "@/components/model-data";
 
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("css", css);
@@ -89,6 +90,8 @@ interface FunnelData {
   selectedCalendarName?: string | null;
   selectedCalendarSlotDuration?: number | null;
   calendarSlots?: Record<string, string[]> | null;
+  companionFunnelId?: string;
+  companionModel?: string;
 }
 
 interface GHLCalendarItem {
@@ -158,6 +161,14 @@ const WAITING_MESSAGES = [
 ];
 
 type GeneratingState = "idle" | "generating" | "aborted" | "error";
+
+interface ModelResult {
+  funnelId: string | null;
+  funnel: FunnelData | null;
+  chatMessages: ChatMessage[];
+  status: "idle" | "generating" | "success" | "error";
+  error?: string;
+}
 
 function getFileLanguage(filePath: string): string {
   if (filePath.endsWith(".tsx") || filePath.endsWith(".ts")) return "typescript";
@@ -248,8 +259,16 @@ export default function GenerateResultPage() {
   const [pendingTimestamp, setPendingTimestamp] = useState<string>("");
   const [pendingModel, setPendingModel] = useState<string>("");
   const generateAbortRef = useRef<AbortController | null>(null);
+  const dualAbortRef = useRef<AbortController | null>(null);
   const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Dual-model generation state
+  const initModelResult = (): ModelResult => ({ funnelId: null, funnel: null, chatMessages: [], status: "idle" });
+  const [geminiResult, setGeminiResult] = useState<ModelResult>(initModelResult);
+  const [openaiResult, setOpenaiResult] = useState<ModelResult>(initModelResult);
+  const [activeModel, setActiveModel] = useState<"gemini" | "openai">("gemini");
+  const [isDualGeneration, setIsDualGeneration] = useState(false);
 
   // Chat state
   const [preGenMessages, setPreGenMessages] = useState<ChatMessage[]>([]); // messages from aborted generations (shown before current prompt)
@@ -591,6 +610,7 @@ export default function GenerateResultPage() {
   // Page route state (must be declared here with all other hooks)
   const [currentPage, setCurrentPage] = useState("/");
   const [pageSelectorOpen, setPageSelectorOpen] = useState(false);
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
 
   // Derived calendar blocking states
   const isCalendarBlocking = hasCalendar && !selectedCalendarId;
@@ -729,33 +749,87 @@ export default function GenerateResultPage() {
     }
   }, [fetchCalendars, fetchSlots]);
 
+  // Helper: run a single model generation and return result
+  const runSingleModelGeneration = useCallback(
+    async (
+      prompt: string,
+      modelId: string,
+      controller: AbortController,
+      images?: string[],
+      scrapeData?: Record<string, unknown>,
+      isImageClone?: boolean,
+      scrapeUrl?: string,
+    ): Promise<{ id: string; funnelData: FunnelData }> => {
+      const t0 = performance.now();
+      console.log(`[DualGen:${modelId}] Starting API call...`);
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, model: modelId, images, scrapeData, isImageClone, scrapeUrl }),
+        signal: controller.signal,
+      });
+
+      console.log(`[DualGen:${modelId}] API response status: ${res.status} (${Math.round(performance.now() - t0)}ms)`);
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: "Failed to generate" }));
+        console.error(`[DualGen:${modelId}] API error:`, errData);
+        throw new Error(errData.error || "Failed to generate");
+      }
+
+      const data = await readStreamResponse<{ id: string; fileCount: number; hasCalendar: boolean }>(
+        res,
+        (_msg: string, eventData?: unknown) => {
+          console.log(`[DualGen:${modelId}] Stream progress: ${_msg}`);
+          if (_msg === "scrape-complete" && eventData && typeof eventData === "object" && "screenshot" in eventData) {
+            const screenshot = (eventData as { screenshot: string }).screenshot;
+            if (screenshot) setPendingPromptImages([screenshot]);
+          }
+        }
+      );
+
+      const elapsed = Math.round(performance.now() - t0);
+      console.log(`[DualGen:${modelId}] Generation complete in ${elapsed}ms — funnelId: ${data.id}, fileCount: ${data.fileCount}, hasCalendar: ${data.hasCalendar}`);
+
+      const funnelRes = await fetch(`/api/funnel/${data.id}`);
+      if (!funnelRes.ok) throw new Error("Failed to load funnel");
+      const funnelData = await funnelRes.json();
+      console.log(`[DualGen:${modelId}] Funnel loaded — ${Object.keys(funnelData.files || {}).length} files`);
+      return { id: data.id, funnelData };
+    },
+    []
+  );
+
   const startGeneration = useCallback(
     async (prompt: string, model: string, images?: string[], scrapeData?: Record<string, unknown>, isImageClone?: boolean, scrapeUrl?: string) => {
       console.log("[startGeneration] Called with:", {
         prompt: prompt?.slice(0, 50),
         model,
         imageCount: images?.length ?? 0,
-        imageSizes: images?.map((img) => `${Math.round(img.length / 1024)}KB`),
         isImageClone,
         scrapeUrl,
-        hasScrapeData: !!scrapeData,
       });
       setGeneratingState("generating");
       setGenerationStep(0);
       setGenerationProgress(0);
       setIsImageCloneMode(!!isImageClone);
 
-      // Select appropriate steps based on mode
+      // Reset dual-model state
+      console.log("[DualGen] Resetting dual-model state, firing parallel generation for Gemini + OpenAI");
+      setGeminiResult(initModelResult());
+      setOpenaiResult(initModelResult());
+      setActiveModel("gemini");
+      setIsDualGeneration(true);
+
       const steps = isImageClone ? IMAGE_CLONE_STEPS : GENERATION_STEPS;
 
-      // Animate steps
       let step = 0;
       stepTimerRef.current = setInterval(() => {
         step = (step + 1) % steps.length;
         setGenerationStep(step);
       }, 3500);
 
-      // Animate progress (slow ramp to ~85%, then pause)
       let progress = 0;
       progressTimerRef.current = setInterval(() => {
         progress += 0.3 + Math.random() * 0.4;
@@ -763,99 +837,152 @@ export default function GenerateResultPage() {
         setGenerationProgress(progress);
       }, 200);
 
-      const controller = new AbortController();
-      generateAbortRef.current = controller;
+      const geminiController = new AbortController();
+      const openaiController = new AbortController();
+      generateAbortRef.current = geminiController;
+      dualAbortRef.current = openaiController;
 
-      try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, model, images, scrapeData, isImageClone, scrapeUrl }),
-          signal: controller.signal,
+      // Mark both as generating
+      setGeminiResult(prev => ({ ...prev, status: "generating" }));
+      setOpenaiResult(prev => ({ ...prev, status: "generating" }));
+
+      let firstCompleted = false;
+
+      // Helper: handle when a model completes successfully
+      const handleModelSuccess = (
+        which: "gemini" | "openai",
+        result: { id: string; funnelData: FunnelData },
+        setResult: React.Dispatch<React.SetStateAction<ModelResult>>
+      ) => {
+        console.log(`[DualGen] ${which} SUCCESS — funnelId: ${result.id}, files: ${Object.keys(result.funnelData.files || {}).length}, isFirst: ${!firstCompleted}`);
+        setResult({
+          funnelId: result.id,
+          funnel: result.funnelData,
+          chatMessages: result.funnelData.chatHistory || [],
+          status: "success",
         });
 
-        console.log("[startGeneration] API response status:", res.status);
+        if (!firstCompleted) {
+          firstCompleted = true;
+          console.log(`[DualGen] 🏆 First model completed: ${which} — showing this result, other model still running`);
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: "Failed to generate" }));
-          console.error("[startGeneration] API error:", errData);
-          throw new Error(errData.error || "Failed to generate");
-        }
+          if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+          if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+          setGenerationProgress(100);
 
-        const data = await readStreamResponse<{ id: string; fileCount: number; hasCalendar: boolean }>(
-          res,
-          (_msg: string, eventData?: unknown) => {
-            // Capture screenshot from server-side scrape for UI display
-            if (_msg === "scrape-complete" && eventData && typeof eventData === "object" && "screenshot" in eventData) {
-              const screenshot = (eventData as { screenshot: string }).screenshot;
-              if (screenshot) {
-                setPendingPromptImages([screenshot]);
-              }
+          // Show the first completed model
+          setActiveModel(which);
+          setFunnel(result.funnelData);
+          setChatMessages(result.funnelData.chatHistory || []);
+          setEditModel(result.funnelData.model);
+          setLoading(false);
+
+          setTimeout(() => {
+            window.history.replaceState(null, "", `/generate/${result.id}`);
+            setGeneratingState("idle");
+            playChime();
+            initCalendarFlow(result.funnelData, result.id);
+
+            if (preGenMessagesRef.current.length > 0) {
+              fetch(`/api/funnel/${result.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ preGenHistory: preGenMessagesRef.current }),
+              }).catch(() => {});
             }
-          }
-        );
 
-        // Finish progress
-        if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-        if (stepTimerRef.current) clearInterval(stepTimerRef.current);
-        setGenerationProgress(100);
-
-        // Small delay for the 100% animation to show
-        await new Promise((r) => setTimeout(r, 600));
-
-        // Update URL without navigation
-        window.history.replaceState(null, "", `/generate/${data.id}`);
-
-        // Load the funnel
-        const funnelRes = await fetch(`/api/funnel/${data.id}`);
-        if (!funnelRes.ok) throw new Error("Failed to load funnel");
-        const funnelData = await funnelRes.json();
-
-        setFunnel(funnelData);
-        setChatMessages(funnelData.chatHistory || []);
-        setEditModel(funnelData.model);
-        setGeneratingState("idle");
-        setLoading(false);
-        playChime();
-
-        // Handle calendar detection
-        initCalendarFlow(funnelData, data.id);
-
-        // Persist pre-generation messages (cancelled exchanges) to the funnel
-        if (preGenMessagesRef.current.length > 0) {
-          fetch(`/api/funnel/${data.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ preGenHistory: preGenMessagesRef.current }),
-          }).catch(() => { /* silent — best effort persistence */ });
+            captureSnapshot(result.id);
+          }, 600);
         }
+      };
 
-        // Capture snapshot after Sandpack renders
-        captureSnapshot(data.id);
-      } catch (err: unknown) {
-        if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-        if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+      // Helper: handle when a model fails
+      const handleModelError = (
+        which: "gemini" | "openai",
+        err: unknown,
+        setResult: React.Dispatch<React.SetStateAction<ModelResult>>
+      ) => {
+        const isAbort = err instanceof DOMException && err.name === "AbortError";
+        const message = isAbort ? "Cancelled" : err instanceof Error ? err.message : "Something went wrong";
+        console.error(`[DualGen] ${which} FAILED — ${isAbort ? "aborted by user" : message}`, isAbort ? "" : err);
+        setResult(prev => ({ ...prev, status: "error", error: message }));
+      };
 
-        if (err instanceof DOMException && err.name === "AbortError") {
-          setGeneratingState("aborted");
-          // Reset calendar state on abort
-          setHasCalendar(false);
-          setCalendarList([]);
-          setSelectedCalendarId(null);
-          setSelectedCalendarName(null);
-          setSelectedCalendarSlotDuration(null);
-          setCalendarSlots(null);
-        } else {
-          const message =
-            err instanceof Error ? err.message : "Something went wrong";
-          setError(message);
-          setGeneratingState("error");
-        }
-      } finally {
-        generateAbortRef.current = null;
-      }
+      // Fire both in parallel
+      console.log(`[DualGen] Firing parallel requests — Gemini: ${DEFAULT_MODEL.id}, OpenAI: ${DUAL_MODEL.id}`);
+      const geminiPromise = runSingleModelGeneration(
+        prompt, DEFAULT_MODEL.id, geminiController, images, scrapeData, isImageClone, scrapeUrl
+      ).then(
+        (result) => handleModelSuccess("gemini", result, setGeminiResult),
+        (err) => handleModelError("gemini", err, setGeminiResult)
+      );
+
+      const openaiPromise = runSingleModelGeneration(
+        prompt, DUAL_MODEL.id, openaiController, images, scrapeData, isImageClone, scrapeUrl
+      ).then(
+        (result) => handleModelSuccess("openai", result, setOpenaiResult),
+        (err) => handleModelError("openai", err, setOpenaiResult)
+      );
+
+      // Wait for both to settle
+      console.log("[DualGen] Waiting for both models to settle...");
+      await Promise.allSettled([geminiPromise, openaiPromise]);
+      console.log("[DualGen] Both models settled");
+
+      // Post-settle: check for failures and link companion funnels
+      setTimeout(() => {
+        setGeminiResult(prev => {
+          setOpenaiResult(oPrev => {
+            console.log(`[DualGen] Post-settle check — gemini: ${prev.status}${prev.error ? ` (${prev.error})` : ""}, openai: ${oPrev.status}${oPrev.error ? ` (${oPrev.error})` : ""}`);
+            if (prev.status === "error" && oPrev.status === "error") {
+              console.error("[DualGen] Both models FAILED — showing error state");
+              setError(prev.error || oPrev.error || "Both models failed");
+              setGeneratingState("error");
+              if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+              if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+            }
+            // Check if both aborted
+            if (prev.status === "error" && prev.error === "Cancelled" &&
+                oPrev.status === "error" && oPrev.error === "Cancelled") {
+              console.log("[DualGen] Both models aborted by user");
+              setGeneratingState("aborted");
+              setHasCalendar(false);
+              setCalendarList([]);
+              setSelectedCalendarId(null);
+              setSelectedCalendarName(null);
+              setSelectedCalendarSlotDuration(null);
+              setCalendarSlots(null);
+              if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+              if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+            }
+
+            // Link companion funnels so the switcher persists on reload
+            if (prev.status === "success" && oPrev.status === "success" && prev.funnelId && oPrev.funnelId) {
+              console.log(`[DualGen] Linking companions: gemini=${prev.funnelId} ↔ openai=${oPrev.funnelId}`);
+              fetch(`/api/funnel/${prev.funnelId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ companionFunnelId: oPrev.funnelId, companionModel: DUAL_MODEL.id }),
+              }).then(r => console.log(`[DualGen] Linked gemini → openai: ${r.status}`))
+                .catch(e => console.error("[DualGen] Failed to link gemini companion:", e));
+              fetch(`/api/funnel/${oPrev.funnelId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ companionFunnelId: prev.funnelId, companionModel: DEFAULT_MODEL.id }),
+              }).then(r => console.log(`[DualGen] Linked openai → gemini: ${r.status}`))
+                .catch(e => console.error("[DualGen] Failed to link openai companion:", e));
+            }
+
+            return oPrev;
+          });
+          return prev;
+        });
+      }, 100);
+
+      generateAbortRef.current = null;
+      dualAbortRef.current = null;
     },
-    [captureSnapshot, initCalendarFlow]
+    [captureSnapshot, initCalendarFlow, runSingleModelGeneration]
   );
 
   useEffect(() => {
@@ -916,6 +1043,46 @@ export default function GenerateResultPage() {
 
         // Restore calendar state
         initCalendarFlow(data, rawId);
+
+        // Restore dual-gen state if this funnel has a companion
+        if (data.companionFunnelId) {
+          console.log(`[Load] Companion found: ${data.companionFunnelId} (model: ${data.companionModel})`);
+          try {
+            const companionRes = await fetch(`/api/funnel/${data.companionFunnelId}`);
+            if (companionRes.ok) {
+              const companionData = await companionRes.json();
+              console.log(`[Load] Companion loaded — ${Object.keys(companionData.files || {}).length} files`);
+
+              // Determine which is gemini and which is openai
+              const thisIsGemini = data.model.startsWith("gemini");
+              const thisResult: ModelResult = {
+                funnelId: rawId,
+                funnel: data,
+                chatMessages: data.chatHistory || [],
+                status: "success",
+              };
+              const companionResult: ModelResult = {
+                funnelId: data.companionFunnelId,
+                funnel: companionData,
+                chatMessages: companionData.chatHistory || [],
+                status: "success",
+              };
+
+              if (thisIsGemini) {
+                setGeminiResult(thisResult);
+                setOpenaiResult(companionResult);
+                setActiveModel("gemini");
+              } else {
+                setOpenaiResult(thisResult);
+                setGeminiResult(companionResult);
+                setActiveModel("openai");
+              }
+              setIsDualGeneration(true);
+            }
+          } catch {
+            console.warn("[Load] Failed to load companion funnel — switcher won't show");
+          }
+        }
 
         // Capture snapshot for existing projects (populates cache over time)
         if (data.files && Object.keys(data.files).length > 0) {
@@ -987,11 +1154,13 @@ export default function GenerateResultPage() {
   }, [codeFiles, openFiles.length]);
 
   const handleAbortGeneration = () => {
+    console.log("[DualGen] User abort — cancelling both controllers");
     if (generateAbortRef.current) {
       generateAbortRef.current.abort();
     }
-    // Force transition even if the abort doesn't trigger the catch block
-    // (e.g. if the fetch already completed but we're awaiting res.json())
+    if (dualAbortRef.current) {
+      dualAbortRef.current.abort();
+    }
     if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     if (stepTimerRef.current) clearInterval(stepTimerRef.current);
     setGeneratingState("aborted");
@@ -999,9 +1168,36 @@ export default function GenerateResultPage() {
 
   const handleRetryGeneration = () => {
     if (pendingPrompt) {
-      startGeneration(pendingPrompt, pendingModel);
+      startGeneration(pendingPrompt, DEFAULT_MODEL.id);
     }
   };
+
+  // Switch between Gemini and OpenAI results in dual-generation mode
+  const handleModelSwitch = useCallback((target: "gemini" | "openai") => {
+    if (target === activeModel) return;
+    const result = target === "gemini" ? geminiResult : openaiResult;
+    if (result.status !== "success" || !result.funnel || !result.funnelId) {
+      console.warn(`[DualGen] Cannot switch to ${target} — status: ${result.status}, hasFunnel: ${!!result.funnel}`);
+      return;
+    }
+
+    console.log(`[DualGen] Switching model: ${activeModel} → ${target} (funnelId: ${result.funnelId}, files: ${Object.keys(result.funnel.files || {}).length})`);
+
+    // Save current chat messages to the model we're leaving
+    const setCurrentResult = activeModel === "gemini" ? setGeminiResult : setOpenaiResult;
+    setChatMessages(currentMsgs => {
+      setCurrentResult(prev => ({ ...prev, chatMessages: currentMsgs }));
+      return result.chatMessages;
+    });
+
+    setActiveModel(target);
+    setFunnel(result.funnel);
+    setEditModel(result.funnel.model);
+    setCodeFiles([]);
+    setRefreshKey(k => k + 1);
+    window.history.replaceState(null, "", `/generate/${result.funnelId}`);
+    initCalendarFlow(result.funnel, result.funnelId);
+  }, [activeModel, geminiResult, openaiResult, initCalendarFlow]);
 
   const handleChatImageSelect = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -1089,6 +1285,12 @@ export default function GenerateResultPage() {
         const updatedFunnel = await funnelRes.json();
         setFunnel(updatedFunnel);
         console.log("[Edit] Funnel reloaded — file count:", Object.keys(updatedFunnel.files || {}).length);
+
+        // Keep dual-model result in sync
+        if (isDualGeneration) {
+          const setResult = activeModel === "gemini" ? setGeminiResult : setOpenaiResult;
+          setResult(prev => ({ ...prev, funnel: updatedFunnel }));
+        }
       }
 
       // Handle calendar detection from edit
@@ -1108,7 +1310,15 @@ export default function GenerateResultPage() {
       } else {
         // No calendar added — show AI message immediately
         console.log("[Edit] No calendar change — showing AI message immediately");
-        setChatMessages((prev) => [...prev, aiMsg]);
+        setChatMessages((prev) => {
+          const updated = [...prev, aiMsg];
+          // Keep dual-model chat in sync
+          if (isDualGeneration) {
+            const setResult = activeModel === "gemini" ? setGeminiResult : setOpenaiResult;
+            setResult(r => ({ ...r, chatMessages: updated }));
+          }
+          return updated;
+        });
       }
 
       if (data.hasCalendar !== undefined && !data.hasCalendar && hasCalendar) {
@@ -1546,6 +1756,108 @@ export default function GenerateResultPage() {
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" /></svg>
                   )}
                 </button>
+
+                {/* Model switcher dropdown — only visible for dual-generated funnels */}
+                {isDualGeneration && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setModelSelectorOpen((v) => !v)}
+                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+                        title={activeModel === "gemini" ? "Gemini 3 Pro" : "GPT 5.4"}
+                      >
+                        {/* Active model icon */}
+                        {activeModel === "gemini" ? (
+                          <img src="/gemini-logo.png" alt="Gemini" className="h-4 w-4 object-contain" />
+                        ) : (
+                          <img src="/openai-logo.png" alt="OpenAI" className="h-4 w-4 object-contain" />
+                        )}
+                        {/* Status indicator for the OTHER model */}
+                        {(() => {
+                          const other = activeModel === "gemini" ? openaiResult : geminiResult;
+                          if (other.status === "generating") return (
+                            <div className="h-2.5 w-2.5 animate-spin rounded-full border border-gray-400 border-t-transparent" />
+                          );
+                          if (other.status === "error") return (
+                            <div className="h-2 w-2 rounded-full bg-amber-400" title={`Other model failed: ${other.error}`} />
+                          );
+                          return null;
+                        })()}
+                      </button>
+                      {modelSelectorOpen && (
+                        <>
+                          <div className="fixed inset-0 z-20" onClick={() => setModelSelectorOpen(false)} />
+                          <div className="absolute left-0 top-full mt-1 z-30 w-48 rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                            {/* Gemini option */}
+                            <button
+                              onClick={() => {
+                                if (geminiResult.status === "success") {
+                                  handleModelSwitch("gemini");
+                                }
+                                setModelSelectorOpen(false);
+                              }}
+                              disabled={geminiResult.status !== "success"}
+                              className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+                                activeModel === "gemini"
+                                  ? "text-blue-600 bg-blue-50 font-medium"
+                                  : geminiResult.status === "success"
+                                    ? "text-gray-700 hover:bg-gray-50"
+                                    : "text-gray-400 cursor-not-allowed"
+                              }`}
+                            >
+                              <img src="/gemini-logo.png" alt="Gemini" className="h-4 w-4 shrink-0 object-contain" />
+                              <span className="flex-1 text-left">Gemini 3 Pro</span>
+                              {geminiResult.status === "generating" && (
+                                <div className="h-3 w-3 animate-spin rounded-full border border-gray-400 border-t-transparent" />
+                              )}
+                              {geminiResult.status === "error" && (
+                                <svg className="h-3.5 w-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                </svg>
+                              )}
+                              {activeModel === "gemini" && geminiResult.status === "success" && (
+                                <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                              )}
+                            </button>
+                            {/* GPT option */}
+                            <button
+                              onClick={() => {
+                                if (openaiResult.status === "success") {
+                                  handleModelSwitch("openai");
+                                }
+                                setModelSelectorOpen(false);
+                              }}
+                              disabled={openaiResult.status !== "success"}
+                              className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+                                activeModel === "openai"
+                                  ? "text-blue-600 bg-blue-50 font-medium"
+                                  : openaiResult.status === "success"
+                                    ? "text-gray-700 hover:bg-gray-50"
+                                    : "text-gray-400 cursor-not-allowed"
+                              }`}
+                            >
+                              <img src="/openai-logo.png" alt="OpenAI" className="h-4 w-4 shrink-0 object-contain" />
+                              <span className="flex-1 text-left">GPT 5.4</span>
+                              {openaiResult.status === "generating" && (
+                                <div className="h-3 w-3 animate-spin rounded-full border border-gray-400 border-t-transparent" />
+                              )}
+                              {openaiResult.status === "error" && (
+                                <svg className="h-3.5 w-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                </svg>
+                              )}
+                              {activeModel === "openai" && openaiResult.status === "success" && (
+                                <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                )}
 
                 {/* Page selector — dropdown always available, click area extends to fill bar */}
                 <div className="relative flex-1 flex items-center">
@@ -1997,7 +2309,7 @@ export default function GenerateResultPage() {
                     }
                     setPendingPrompt(chatInput.trim());
                     setPendingTimestamp(new Date().toISOString());
-                    startGeneration(chatInput.trim(), pendingModel);
+                    startGeneration(chatInput.trim(), DEFAULT_MODEL.id);
                     setChatInput("");
                   } else {
                     handleRetryGeneration();

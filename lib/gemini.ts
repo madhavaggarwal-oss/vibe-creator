@@ -46,7 +46,7 @@ function imagesToParts(images: string[]): Part[] {
 
 // Models are defined in components/model-data.ts (single source of truth)
 
-const SYSTEM_PROMPT = `You are a world-class UI/UX designer and frontend engineer. You design websites that look like they were built by top design agencies — think Linear, Vercel, Stripe, Framer, Raycast quality. You produce production-grade React + TypeScript + Tailwind CSS projects.
+export const SYSTEM_PROMPT = `You are a world-class UI/UX designer and frontend engineer. You design websites that look like they were built by top design agencies — think Linear, Vercel, Stripe, Framer, Raycast quality. You produce production-grade React + TypeScript + Tailwind CSS projects.
 
 The user will describe a website or landing page. Generate a complete, stunning React + Vite project.
 
@@ -511,7 +511,7 @@ Example form:
 - All content visible without JavaScript scroll triggers — scroll animations are progressive enhancement only
 - Mobile responsive: use sm:, md:, lg: breakpoints throughout`;
 
-const CLONE_SYSTEM_PROMPT = `You are a pixel-perfect website cloning specialist. You will receive:
+export const CLONE_SYSTEM_PROMPT = `You are a pixel-perfect website cloning specialist. You will receive:
 1. A full-page SCREENSHOT of the target website (as an image)
 2. The page's MARKDOWN content (exact text/copy from the original)
 3. The page's BRANDING data (exact colors, fonts, typography, spacing)
@@ -759,7 +759,7 @@ Example form:
 - Navbar: sticky top-0 (not fixed)
 - All content visible without JavaScript scroll triggers`;
 
-const IMAGE_CLONE_SYSTEM_PROMPT = `You are a pixel-perfect website cloning specialist. You will receive one or more SCREENSHOTS of a website or design and must recreate it as an exact visual replica using React + TypeScript + Tailwind CSS.
+export const IMAGE_CLONE_SYSTEM_PROMPT = `You are a pixel-perfect website cloning specialist. You will receive one or more SCREENSHOTS of a website or design and must recreate it as an exact visual replica using React + TypeScript + Tailwind CSS.
 
 ═══════════════════════════════════════
   OUTPUT FORMAT
@@ -1073,7 +1073,7 @@ Example form:
 - All content visible without JavaScript scroll triggers — no element should be cut off or overflow the viewport
 - Mobile responsive: use sm:, md:, lg: breakpoints`;
 
-const EDIT_SYSTEM_PROMPT = `You are an elite web designer and frontend developer editing an existing React + TypeScript + Tailwind CSS project. You will receive the current project files and an edit instruction from the user.
+export const EDIT_SYSTEM_PROMPT = `You are an elite web designer and frontend developer editing an existing React + TypeScript + Tailwind CSS project. You will receive the current project files and an edit instruction from the user.
 
 ═══════════════════════════════════════
   OUTPUT FORMAT
@@ -1402,7 +1402,7 @@ function repairBraces(files: Record<string, string>): Record<string, string> {
  * arbitrary hex values. Tailwind CDN in Sandpack cannot read tailwind.config,
  * so custom colors like "primary" render as nothing.
  */
-function resolveCustomColors(files: Record<string, string>): Record<string, string> {
+export function resolveCustomColors(files: Record<string, string>): Record<string, string> {
   // Extract custom colors from tailwind.config if present
   const configFile = files["/tailwind.config.ts"] || files["/tailwind.config.js"] || "";
   if (!configFile) return files;
@@ -1456,7 +1456,7 @@ function resolveCustomColors(files: Record<string, string>): Record<string, stri
  * The AI sometimes generates @tailwind, @apply, or @layer directives despite being
  * told not to — these cause "/src/index.css: 1:1: Unknown word" errors in Sandpack.
  */
-function sanitizeCssFiles(files: Record<string, string>): Record<string, string> {
+export function sanitizeCssFiles(files: Record<string, string>): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [path, content] of Object.entries(files)) {
     if (!path.endsWith(".css")) {
@@ -1488,7 +1488,7 @@ function sanitizeCssFiles(files: Record<string, string>): Record<string, string>
  * even logos/icons that already have fixed sizing (h-8 w-auto object-contain).
  * This strips the conflicting trailing classes when a fixed-size pattern is present.
  */
-function fixImageClassNames(files: Record<string, string>): Record<string, string> {
+export function fixImageClassNames(files: Record<string, string>): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [path, content] of Object.entries(files)) {
     if (!path.endsWith(".tsx") && !path.endsWith(".jsx")) {
@@ -1531,7 +1531,7 @@ function fixImageClassNames(files: Record<string, string>): Record<string, strin
  * 2. jsonrepair library
  * 3. Manual extraction of complete file entries (handles truncated output)
  */
-function parseAIJson(text: string): unknown {
+export function parseAIJson(text: string): unknown {
   // Strip markdown code fences if present
   let cleaned = text.trim();
   cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");

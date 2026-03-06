@@ -33,6 +33,8 @@ export async function GET(
       selectedCalendarName: funnel.selectedCalendarName || null,
       selectedCalendarSlotDuration: funnel.selectedCalendarSlotDuration || null,
       calendarSlots: funnel.calendarSlots || null,
+      companionFunnelId: funnel.companionFunnelId || null,
+      companionModel: funnel.companionModel || null,
     });
   }
 
@@ -88,6 +90,10 @@ export async function PATCH(
   }
   if (body.hasCalendar !== undefined) {
     funnel.hasCalendar = body.hasCalendar;
+  }
+  if (body.companionFunnelId !== undefined) {
+    funnel.companionFunnelId = body.companionFunnelId || undefined;
+    funnel.companionModel = body.companionModel || undefined;
   }
 
   await saveFunnel(funnel, userId);

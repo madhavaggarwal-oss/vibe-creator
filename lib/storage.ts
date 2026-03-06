@@ -57,6 +57,8 @@ export interface Funnel {
   selectedCalendarName?: string;
   selectedCalendarSlotDuration?: number;
   calendarSlots?: Record<string, string[]>;
+  companionFunnelId?: string;
+  companionModel?: string;
 }
 
 /**

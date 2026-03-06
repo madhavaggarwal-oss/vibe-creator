@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import { generateFunnel } from "@/lib/gemini";
+import { generateFunnel as geminiGenerateFunnel } from "@/lib/gemini";
 import { saveFunnel, extractProjectName } from "@/lib/storage";
 import { createStreamingResponse } from "@/lib/stream-response";
 import { getCurrentUserId } from "@/lib/supabase/server";
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Prompt is required" }, { status: 400 });
   }
 
-  const modelId = model || "gemini-3-flash-preview";
+  const modelId = model || "gemini-3-pro-preview";
   const id = uuidv4();
 
   const MAX_IMAGES = 10;
@@ -67,6 +67,13 @@ export async function POST(request: NextRequest) {
       }
 
       send({ type: "progress", message: "Generating code with AI..." });
+
+      // Route to the correct provider based on model ID
+      const provider = modelId.startsWith("gpt-") ? "openai" : "gemini";
+      console.log(`[Generate API] Provider routing: model=${modelId} → provider=${provider}`);
+      const generateFunnel = provider === "openai"
+        ? (await import("@/lib/openai")).generateFunnel
+        : geminiGenerateFunnel;
 
       const { files, hasCalendar } = await generateFunnel(
         prompt.trim(),

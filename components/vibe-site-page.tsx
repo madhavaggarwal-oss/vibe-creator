@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { MODELS } from "./model-data";
+import { DEFAULT_MODEL } from "./model-data";
 import { processImageFiles, processCloneImageFiles, type PendingImage } from "@/lib/image-utils";
 import { type FunnelProject, formatRelativeDate } from "@/lib/shared-types";
 import { setPendingGeneration } from "@/lib/pending-generation";
@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 export default function VibeSitePage() {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState<string>(MODELS[0].id);
+  const model = DEFAULT_MODEL.id;
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<FunnelProject[]>([]);
@@ -379,33 +379,6 @@ export default function VibeSitePage() {
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Model selector */}
-                  <div className="relative">
-                    <select
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                      disabled={generating}
-                      className="appearance-none rounded-lg border border-gray-200 bg-gray-50 pl-2.5 pr-7 py-1.5 text-xs text-gray-600 outline-none focus:border-blue-300 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {MODELS.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                    <svg
-                      width="12"
-                      height="12"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                    </svg>
-                  </div>
-
                   {/* Submit button */}
                   <button
                     onClick={handleSubmit}

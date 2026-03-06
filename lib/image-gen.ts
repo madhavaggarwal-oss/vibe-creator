@@ -315,15 +315,18 @@ async function generateAndUploadImages(
     let lastErr: Error | undefined;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        return await generate();
+        const result = await generate();
+        console.log(`[image-gen] ✓ "${marker.description.slice(0, 40)}..." generated on attempt ${attempt}`);
+        return result;
       } catch (err) {
         lastErr = err as Error;
-        console.warn(`[image-gen] Attempt ${attempt}/${MAX_RETRIES} failed: ${lastErr.message}`);
+        console.warn(`[image-gen] ✗ "${marker.description.slice(0, 40)}..." attempt ${attempt}/${MAX_RETRIES} failed: ${lastErr.message}`);
         if (attempt < MAX_RETRIES) {
           await delay(1000 * attempt); // 1s, 2s backoff
         }
       }
     }
+    console.error(`[image-gen] ✗✗ "${marker.description.slice(0, 40)}..." FAILED all ${MAX_RETRIES} attempts`);
     throw lastErr;
   });
 
@@ -425,6 +428,10 @@ function fixBrokenImageSrcs(
 ): Record<string, string> {
   const result: Record<string, string> = {};
   let fixCount = 0;
+  const skippedSrcs: string[] = [];
+  const validSrcs: string[] = [];
+  const brokenSrcs: string[] = [];
+  const iconSkips: string[] = [];
 
   // Simple src extraction — avoids complex regex that can cause stack overflow on large files
   const SRC_REGEX = /src\s*=\s*"([^"]*)"/i;
@@ -446,9 +453,15 @@ function fixBrokenImageSrcs(
       const src = srcMatch[1].trim();
 
       // Already valid — leave it alone
-      if (isValidImageSrc(src)) return line;
+      if (isValidImageSrc(src)) {
+        validSrcs.push(src.slice(0, 80));
+        return line;
+      }
       // Not broken and looks like a real URL
-      if (!isBrokenSrc(src) && src.startsWith("http")) return line;
+      if (!isBrokenSrc(src) && src.startsWith("http")) {
+        skippedSrcs.push(src.slice(0, 120));
+        return line;
+      }
 
       // Skip small icon-sized images — don't replace icons with AI-generated photos
       // Detect by className having small fixed dimensions (h-4 to h-12, w-4 to w-12)
@@ -456,9 +469,12 @@ function fixBrokenImageSrcs(
       const cls = clsMatch ? clsMatch[1] : "";
       const isSmallIcon = /\b[wh]-(?:[4-9]|1[0-2])\b/.test(cls) && !cls.includes("w-full");
       if (isSmallIcon) {
+        iconSkips.push(`${filePath}: src="${src.slice(0, 60)}" cls="${cls.slice(0, 60)}"`);
         // Remove the broken src entirely — leave a transparent placeholder
         return line.replace(SRC_REGEX, 'src=""');
       }
+
+      brokenSrcs.push(`${filePath}: "${src.slice(0, 80)}"`);
 
       // Extract alt text for the marker description
       const altMatch = line.match(ALT_REGEX);
@@ -480,8 +496,15 @@ function fixBrokenImageSrcs(
     result[filePath] = fixedLines.join("\n");
   }
 
-  if (fixCount > 0) {
-    console.log(`[image-gen] Fixed ${fixCount} broken/placeholder image src attributes → markers`);
+  console.log(`[image-gen] fixBrokenImageSrcs summary: ${fixCount} fixed, ${validSrcs.length} already valid, ${skippedSrcs.length} skipped (real URLs), ${iconSkips.length} icon skips`);
+  if (skippedSrcs.length > 0) {
+    console.log(`[image-gen] Skipped real URLs (NOT converted to markers):`, skippedSrcs);
+  }
+  if (brokenSrcs.length > 0) {
+    console.log(`[image-gen] Broken srcs converted to markers:`, brokenSrcs);
+  }
+  if (iconSkips.length > 0) {
+    console.log(`[image-gen] Icon-sized images skipped:`, iconSkips);
   }
 
   return result;
@@ -668,6 +691,8 @@ function ensureImageFitClasses(
 export function replaceMarkersWithPlaceholders(
   files: Record<string, string>
 ): { files: Record<string, string>; pendingImages: PendingImageEntry[] } {
+  console.log(`[image-gen] === START replaceMarkersWithPlaceholders (Phase 1) ===`);
+
   // Layer 1: Convert broken/placeholder image src values into __IMG: markers
   const fixed = fixBrokenImageSrcs(files);
 
@@ -680,6 +705,7 @@ export function replaceMarkersWithPlaceholders(
   const markers = extractImageMarkers(withContainers);
 
   if (markers.length === 0) {
+    console.log(`[image-gen] Phase 1: No markers found — no images to process`);
     return { files: ensureImageFitClasses(withContainers), pendingImages: [] };
   }
 
@@ -764,6 +790,26 @@ export async function generateImagesForFiles(
 export async function processImageMarkers(
   files: Record<string, string>
 ): Promise<Record<string, string>> {
+  // Count all <img tags across all files for baseline
+  let totalImgTags = 0;
+  for (const content of Object.values(files)) {
+    if (typeof content === "string") {
+      const matches = content.match(/<img\b/g);
+      if (matches) totalImgTags += matches.length;
+    }
+  }
+  console.log(`[image-gen] === START processImageMarkers === Total <img> tags in files: ${totalImgTags}`);
+
+  // Count __IMG: markers already present before any processing
+  let preExistingMarkers = 0;
+  for (const content of Object.values(files)) {
+    if (typeof content === "string") {
+      const matches = content.match(/__IMG:[^_]+(?:_(?!_)[^_]*)*__/g);
+      if (matches) preExistingMarkers += matches.length;
+    }
+  }
+  console.log(`[image-gen] Pre-existing __IMG: markers in AI output: ${preExistingMarkers}`);
+
   // Layer 1: Convert broken/placeholder image src values into __IMG: markers
   const fixed = fixBrokenImageSrcs(files);
 
@@ -775,6 +821,20 @@ export async function processImageMarkers(
 
   const markers = extractImageMarkers(withContainers);
   if (markers.length === 0) {
+    console.log(`[image-gen] No markers found after processing — all images must use direct URLs or are missing`);
+    // Log all img src values to help debug
+    const allSrcs: string[] = [];
+    for (const [filePath, content] of Object.entries(withContainers)) {
+      if (typeof content !== "string" || !/\.(tsx|jsx|html)$/.test(filePath)) continue;
+      const srcRegex = /src\s*=\s*"([^"]*)"/gi;
+      let m: RegExpExecArray | null;
+      while ((m = srcRegex.exec(content)) !== null) {
+        if (m[1]) allSrcs.push(`${filePath}: "${m[1].slice(0, 100)}"`);
+      }
+    }
+    if (allSrcs.length > 0) {
+      console.log(`[image-gen] All img src values in generated files (${allSrcs.length}):`, allSrcs.slice(0, 30));
+    }
     // Still ensure fit classes even when no markers
     return ensureImageFitClasses(withContainers);
   }
@@ -785,12 +845,19 @@ export async function processImageMarkers(
     return ensureImageFitClasses(withFallbacks);
   }
 
-  console.log(`[image-gen] Processing ${markers.length} image markers...`);
+  console.log(`[image-gen] Processing ${markers.length} image markers:`, markers.map(m => `"${m.description.slice(0, 50)}" (${m.width}x${m.height})`));
+  const t0 = Date.now();
   const urlMap = await generateAndUploadImages(markers);
-  console.log(`[image-gen] Generated ${urlMap.size}/${markers.length} images`);
+  console.log(`[image-gen] Generated ${urlMap.size}/${markers.length} images in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+  if (urlMap.size < markers.length) {
+    const failed = markers.filter(m => !urlMap.has(m.full));
+    console.warn(`[image-gen] FAILED images (${failed.length}):`, failed.map(m => `"${m.description.slice(0, 50)}"`));
+  }
 
   const withImages = replaceImageMarkers(withContainers, urlMap, markers);
 
   // Final pass: ensure all <img> tags have object-cover w-full h-full
+  console.log(`[image-gen] === END processImageMarkers === ${urlMap.size} generated, ${markers.length - urlMap.size} fallbacks`);
   return ensureImageFitClasses(withImages);
 }
