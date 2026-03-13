@@ -778,6 +778,28 @@ function fixMissingRouterImports(code: string): string {
   return importLine + code;
 }
 
+const CONFIG_FILE_RE = /^\/(vite|postcss|tailwind|eslint)\.config\.(ts|js|mjs|cjs)$|^\/(tsconfig|jsconfig)\.json$/;
+const TAILWIND_CONFIG_RE = /^\/tailwind\.config\.(ts|js|mjs|cjs)$/;
+
+const BUILD_TOOL_BLOCKLIST = new Set([
+  "vite",
+  "@vitejs/plugin-react",
+  "@vitejs/plugin-react-swc",
+  "webpack",
+  "esbuild",
+  "rollup",
+  "rolldown",
+  "postcss",
+  "autoprefixer",
+  "tailwindcss",
+  "typescript",
+  "vitest",
+  "react-scripts",
+  "@types/react",
+  "@types/react-dom",
+  "@types/node",
+]);
+
 export default function ReactProjectPreview({
   files,
   refreshKey,
@@ -805,6 +827,26 @@ export default function ReactProjectPreview({
       // Skip null/non-string values (can happen from truncated AI output)
       if (typeof code !== "string") continue;
       const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+      // Skip config files BEFORE import scanning to prevent build tools
+      // (vite, postcss, etc.) from being added to Sandpack dependencies
+      if (TAILWIND_CONFIG_RE.test(normalizedPath)) {
+        tailwindThemeConfig = extractTailwindThemeConfig(code);
+        if (tailwindThemeConfig) {
+          console.log("[ReactPreview] Extracted Tailwind theme config:", tailwindThemeConfig);
+        } else {
+          console.warn("[ReactPreview] tailwind.config found but failed to extract theme config");
+        }
+        hexToPaletteMap = buildHexToPaletteMap(code);
+        if (hexToPaletteMap.size > 0) {
+          console.log("[ReactPreview] Built hex-to-palette map:", Object.fromEntries(hexToPaletteMap));
+        }
+        continue;
+      }
+
+      if (CONFIG_FILE_RE.test(normalizedPath)) {
+        continue;
+      }
 
       // Scan source files for third-party imports (not relative paths)
       if (/\.(tsx?|jsx?)$/.test(normalizedPath)) {
@@ -848,6 +890,9 @@ export default function ReactProjectPreview({
           const pkg = JSON.parse(code);
           if (pkg.dependencies) {
             const { react, "react-dom": reactDom, ...otherDeps } = pkg.dependencies;
+            for (const blocked of BUILD_TOOL_BLOCKLIST) {
+              delete otherDeps[blocked];
+            }
             deps = { ...deps, ...otherDeps };
           }
         } catch {
@@ -862,32 +907,8 @@ export default function ReactProjectPreview({
         continue;
       }
 
-      if (
-        normalizedPath === "/tailwind.config.ts" ||
-        normalizedPath === "/tailwind.config.js"
-      ) {
-        // Extract theme config so we can pass it to Tailwind CDN inline
-        tailwindThemeConfig = extractTailwindThemeConfig(code);
-        if (tailwindThemeConfig) {
-          console.log("[ReactPreview] Extracted Tailwind theme config:", tailwindThemeConfig);
-        } else {
-          console.warn("[ReactPreview] tailwind.config found but failed to extract theme config");
-        }
-        // Build reverse hex→palette-key map for fixing malformed classes
-        hexToPaletteMap = buildHexToPaletteMap(code);
-        if (hexToPaletteMap.size > 0) {
-          console.log("[ReactPreview] Built hex-to-palette map:", Object.fromEntries(hexToPaletteMap));
-        }
-        continue;
-      }
-
-      if (
-        normalizedPath === "/vite.config.ts" ||
-        normalizedPath === "/postcss.config.js" ||
-        normalizedPath === "/tsconfig.json"
-      ) {
-        continue;
-      }
+      // Config files (vite, postcss, tailwind, tsconfig, etc.) are already
+      // handled above before import scanning — no need to check again here.
 
       if (normalizedPath === "/src/main.tsx") {
         sfFiles[normalizedPath] = { code: fixRouterImports(code), hidden: true };
@@ -912,6 +933,10 @@ export default function ReactProjectPreview({
     // Auto-add any imported packages the AI forgot to put in package.json
     for (const pkg of importedPackages) {
       if (!deps[pkg]) {
+        if (BUILD_TOOL_BLOCKLIST.has(pkg)) {
+          console.warn(`[dep-filter] Blocked build tool from Sandpack deps: ${pkg}`);
+          continue;
+        }
         deps[pkg] = "latest";
       }
     }
