@@ -2,6 +2,18 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // ── Public paths (no auth required) ──
+  const isPublicPath =
+    pathname === "/login" ||
+    pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/auth/") ||
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/s/") ||
+    pathname.startsWith("/api/site/");
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -29,15 +41,6 @@ export async function updateSession(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  // Allow unauthenticated access to login page, auth callback, and static assets
-  const { pathname } = request.nextUrl;
-  const isPublicPath =
-    pathname === "/login" ||
-    pathname.startsWith("/api/auth/") ||
-    pathname.startsWith("/auth/") ||
-    pathname.startsWith("/_next/") ||
-    pathname.startsWith("/favicon");
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone();

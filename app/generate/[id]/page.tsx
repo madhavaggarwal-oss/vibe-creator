@@ -330,6 +330,14 @@ export default function GenerateResultPage() {
   const [calendarFromEdit, setCalendarFromEdit] = useState(false);
   const [deferredCalendarAiMsg, setDeferredCalendarAiMsg] = useState<ChatMessage | null>(null);
 
+  // Publish state
+  const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [publishSlug, setPublishSlug] = useState("");
+  const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishSuccess, setPublishSuccess] = useState(false);
+
   // Restore chat width from localStorage
   useEffect(() => {
     try {
@@ -1096,6 +1104,46 @@ export default function GenerateResultPage() {
     }
     loadFunnel();
   }, [rawId, router, startGeneration, captureSnapshot, initCalendarFlow]);
+
+  // Check if this funnel has been published
+  useEffect(() => {
+    if (!funnel?.id) return;
+    fetch(`/api/funnel/${funnel.id}/publish`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.slug) {
+          setPublishedSlug(data.slug);
+          setPublishSlug(data.slug);
+        }
+      })
+      .catch(() => {});
+  }, [funnel?.id]);
+
+  // Publish handler
+  const handlePublish = useCallback(async () => {
+    if (!funnel?.id || !publishSlug.trim()) return;
+    setIsPublishing(true);
+    setPublishError(null);
+    setPublishSuccess(false);
+    try {
+      const res = await fetch(`/api/funnel/${funnel.id}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: publishSlug.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPublishError(data.error || "Failed to publish");
+        return;
+      }
+      setPublishedSlug(data.slug);
+      setPublishSuccess(true);
+    } catch {
+      setPublishError("Network error. Please try again.");
+    } finally {
+      setIsPublishing(false);
+    }
+  }, [funnel?.id, publishSlug]);
 
   // Re-fetch slots when preview refreshes and calendar is selected
   useEffect(() => {
@@ -1941,22 +1989,38 @@ export default function GenerateResultPage() {
               </button>
             ) : (
               <>
+                {publishedSlug && (
+                  <a
+                    href={`/s/${publishedSlug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 h-8 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    title={`Live at vibe-creator.com/s/${publishedSlug}`}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-green-500" />
+                    Live
+                  </a>
+                )}
                 <button
                   disabled={isGenerating || isAborted}
-                  title={isGenerating || isAborted ? "Creation in Progress" : undefined}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 h-8 text-sm font-medium text-gray-700 transition-colors ${isGenerating || isAborted ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-50"}`}
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
-                  </svg>
-                  Share
-                </button>
-                <button
-                  disabled={isGenerating || isAborted}
+                  onClick={() => {
+                    setPublishError(null);
+                    setPublishSuccess(false);
+                    if (!publishedSlug && !publishSlug) {
+                      const name = funnel?.name || "";
+                      const slug = name
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, "-")
+                        .replace(/^-|-$/g, "")
+                        .slice(0, 63);
+                      setPublishSlug(slug);
+                    }
+                    setShowPublishDialog(true);
+                  }}
                   title={isGenerating || isAborted ? "Creation in Progress" : undefined}
                   className={`inline-flex items-center rounded-lg bg-blue-600 px-5 h-8 text-sm font-semibold text-white shadow-sm transition-all ${isGenerating || isAborted ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-700"}`}
                 >
-                  Publish
+                  {publishedSlug ? "Republish" : "Publish"}
                 </button>
               </>
             )}
@@ -2811,6 +2875,105 @@ export default function GenerateResultPage() {
           )}
         </div>
       </div>
+
+      {/* Publish dialog */}
+      {showPublishDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPublishDialog(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <button
+              onClick={() => setShowPublishDialog(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">
+              {publishedSlug ? "Republish Site" : "Publish Site"}
+            </h2>
+            <p className="text-sm text-gray-500 mb-5">
+              {publishedSlug
+                ? "Update your live site with the latest changes."
+                : "Choose a name for your public URL."}
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Site URL</label>
+                <div className="flex items-center rounded-lg border border-gray-300 bg-gray-50 overflow-hidden focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+                  <span className="pl-3 text-sm text-gray-400 whitespace-nowrap">vibe-creator.com/s/</span>
+                  <input
+                    type="text"
+                    value={publishSlug}
+                    onChange={(e) => {
+                      const val = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+                      setPublishSlug(val);
+                      setPublishError(null);
+                      setPublishSuccess(false);
+                    }}
+                    placeholder="my-awesome-site"
+                    disabled={!!publishedSlug}
+                    className="flex-1 bg-transparent px-3 py-2.5 text-sm text-gray-900 outline-none disabled:text-gray-500"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && publishSlug.trim()) handlePublish();
+                    }}
+                  />
+                </div>
+                {publishError && (
+                  <p className="mt-1.5 text-sm text-red-600">{publishError}</p>
+                )}
+                {publishSuccess && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 px-3 py-2">
+                    <svg className="h-4 w-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    <span className="text-sm text-green-700">
+                      Published! Your site is live at{" "}
+                      <a
+                        href={`/s/${publishedSlug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium underline"
+                      >
+                        vibe-creator.com/s/{publishedSlug}
+                      </a>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setShowPublishDialog(false)}
+                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  {publishSuccess ? "Close" : "Cancel"}
+                </button>
+                {!publishSuccess && (
+                  <button
+                    onClick={handlePublish}
+                    disabled={isPublishing || !publishSlug.trim()}
+                    className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {isPublishing ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                        Publishing...
+                      </span>
+                    ) : publishedSlug ? (
+                      "Update Site"
+                    ) : (
+                      "Publish"
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -298,3 +298,116 @@ export async function deleteSnapshot(id: string): Promise<void> {
 
   await supabase.from("snapshots").delete().eq("funnel_id", id);
 }
+
+// ---------------------------------------------------------------------------
+// Published sites
+// ---------------------------------------------------------------------------
+
+const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export function isValidSlug(slug: string): boolean {
+  return SLUG_REGEX.test(slug) && slug.length >= 2 && slug.length <= 63;
+}
+
+export interface PublishedSite {
+  slug: string;
+  funnel_id: string;
+  user_id: string;
+  site_name: string;
+  files: Record<string, string>;
+  published_at: string;
+}
+
+/**
+ * Publish (or re-publish) a funnel to a public slug.
+ * Returns the slug on success, or throws on conflict/error.
+ */
+export async function publishSite(
+  slug: string,
+  funnelId: string,
+  userId: string,
+  siteName: string,
+  files: Record<string, string>
+): Promise<string> {
+  if (!isValidSlug(slug)) {
+    throw new Error("Invalid slug. Use 2-63 lowercase letters, numbers, and hyphens.");
+  }
+
+  const supabase = getSupabase();
+
+  // Check if slug is taken by another user's funnel
+  const { data: existing } = await supabase
+    .from("published_sites")
+    .select("funnel_id, user_id")
+    .eq("slug", slug)
+    .single();
+
+  if (existing && existing.funnel_id !== funnelId) {
+    throw new Error("This name is already taken. Please choose another.");
+  }
+
+  const { error } = await supabase.from("published_sites").upsert(
+    {
+      slug,
+      funnel_id: funnelId,
+      user_id: userId,
+      site_name: siteName,
+      files,
+      published_at: new Date().toISOString(),
+    },
+    { onConflict: "slug" }
+  );
+
+  if (error) {
+    console.error("[storage] Failed to publish site:", error);
+    throw new Error(`Failed to publish: ${error.message}`);
+  }
+
+  return slug;
+}
+
+/**
+ * Get a published site by slug (public, no auth required).
+ */
+export async function getPublishedSite(slug: string): Promise<PublishedSite | null> {
+  if (!isValidSlug(slug)) {
+    return null;
+  }
+
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from("published_sites")
+    .select("*")
+    .eq("slug", slug)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as PublishedSite;
+}
+
+/**
+ * Get the published slug for a funnel (if any).
+ */
+export async function getPublishedSlugForFunnel(funnelId: string): Promise<string | null> {
+  if (!isValidFunnelId(funnelId)) {
+    return null;
+  }
+
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from("published_sites")
+    .select("slug")
+    .eq("funnel_id", funnelId)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data.slug;
+}
